@@ -4,6 +4,21 @@ from discord import app_commands
 import json, os, asyncio
 from datetime import timedelta, datetime
 from typing import Union, Optional, List, Dict
+from flask import Flask
+from threading import Thread
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "البوت يعمل!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
 # ══════════════════════════════════════════════════════════════
 #                   ضع التوكن هنا ↓
@@ -356,5 +371,6 @@ async def on_ready():
 async def sync(ctx):
     await bot.tree.sync()
     await ctx.send("✅ تم تحديث الأوامر!")
+keep_alive()
 
 bot.run(TOKEN)
