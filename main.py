@@ -302,7 +302,7 @@ async def on_ready():
     for guild in bot.guilds: await ensure_log_channel(guild)
     print(f"✅ {bot.user} جاهز للعمل بجميع الميزات!")
 
-bot.run(TOKEN)
+
 
 # 1. إعداد المتغيرات والأمان
 # سيقوم الكود بسحب التوكن من إعدادات الاستضافة (Render/CodeSandbox)
