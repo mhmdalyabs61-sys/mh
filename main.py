@@ -1,19 +1,30 @@
-import os
-import discord
-import asyncio
-from discord.ext import commands
-from flask import Flask
-from threading import Thread
 import discord
 from discord.ext import commands
 from discord import app_commands
 import json, os, asyncio
 from datetime import timedelta, datetime
 from typing import Union, Optional, List, Dict
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "I am alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
 # ══════════════════════════════════════════════════════════════
 #                   ضع التوكن هنا ↓
 # ══════════════════════════════════════════════════════════════
+import os
+TOKEN = os.getenv('TOKEN')
 
 # ══════════════════════════════════════════════════════════════
 
@@ -129,8 +140,7 @@ async def send_log(guild: discord.Guild, message: str):
 
 async def ban_user(guild, user, reason):
     if user.id == bot.user.id or user.id in bot_data['whitelisted']: return
-    try: await user.send(f"🚫 **تم طردك من سيرفر {guild.name}**\n📝 **السبب:** {reason}\nرح دور لك سيرفر ثاني يا هطف.")
-    except: pass
+  
     try:
         await guild.ban(user, reason=reason)
         await send_log(guild, f"🔨 **تم تبنيد** {user.mention} | السبب: {reason}")
@@ -212,13 +222,6 @@ async def setup_radio(interaction: discord.Interaction):
     if not channel: return await interaction.response.send_message("❌ الروم غير موجود.", ephemeral=True)
     await channel.send("📻 **نظام الموجات:**\nاضغط على الزائد (+) لإنشاء أو دخول موجتك الخاصة.", view=RadioView())
     await interaction.response.send_message("✅ تم الإرسال.", ephemeral=True)
-
-@bot.tree.command(name="protection", description="تفعيل أو تعطيل الحماية")
-async def protection(interaction: discord.Interaction, feature: str, status: bool):
-    if not await check_hierarchy(interaction): return
-    bot_data['protection'][feature] = status
-    save_data(bot_data)
-    await interaction.response.send_message(f"✅ تم التحديث.", ephemeral=True)
 
 @bot.tree.command(name="whitelist", description="القائمة البيضاء")
 async def whitelist(interaction: discord.Interaction, user: discord.Member):
@@ -302,44 +305,46 @@ async def on_ready():
     for guild in bot.guilds: await ensure_log_channel(guild)
     print(f"✅ {bot.user} جاهز للعمل بجميع الميزات!")
 
-
-
-# 1. إعداد المتغيرات والأمان
-# سيقوم الكود بسحب التوكن من إعدادات الاستضافة (Render/CodeSandbox)
-TOKEN = os.environ.get('TOKEN')
-
-if not TOKEN:
-    print("❌ خطأ: لم يتم العثور على التوكن في إعدادات النظام!")
-    exit()
-
-# 2. إعداد البوت
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-# 3. إعداد الويب الوهمي (Keep-Alive)
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "البوت يعمل بكامل طاقته!"
-
-def run():
-    # Render يحدد البورت تلقائياً
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-def run_web_server():
-    t = Thread(target=run)
-    t.start()
-
-# 4. تشغيل البوت والويب
 @bot.event
-async def on_ready():
-    print(f"✅ تم تسجيل الدخول كـ {bot.user}")
-    print(f"✅ نظام الويب الوهمي نشط!")
+async def on_guild_channel_create(channel):
+    if not bot_data['protection'].get('channel_create', True): return
+    guild = channel.guild
+    async for entry in guild.audit_logs(action=discord.AuditLogAction.channel_create, limit=1):
+        if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
+            await ban_user(guild, entry.user, "إنشاء قناة غير مصرح")
+            try: await channel.delete()
+            except: pass
+            break
 
-# تشغيل السيرفر قبل البوت
-run_web_server()
+@bot.event
+async def on_guild_role_create(role):
+    if not bot_data['protection'].get('role_create', True): return
+    guild = role.guild
+    async for entry in guild.audit_logs(action=discord.AuditLogAction.role_create, limit=1):
+        if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
+            await ban_user(guild, entry.user, "إنشاء رتبة غير مصرح")
+            try: await role.delete()
+            except: pass
+            break
 
-# تشغيل البوت
+@bot.tree.command(name="protection", description="تفعيل أو تعطيل أنواع الحماية")
+@app_commands.choices(feature=[
+    app_commands.Choice(name="حذف القنوات", value="channel_del"),
+    app_commands.Choice(name="تعديل القنوات", value="channel_update"),
+    app_commands.Choice(name="حذف الرتب", value="role_del"),
+    app_commands.Choice(name="إنشاء الرتب", value="role_create"),
+    app_commands.Choice(name="إنشاء القنوات", value="channel_create"),
+    app_commands.Choice(name="الويب هوك", value="webhook"),
+    app_commands.Choice(name="إضافة بوتات", value="bot_add")
+])
+async def protection(interaction: discord.Interaction, feature: app_commands.Choice[str], status: bool):
+    if not await check_hierarchy(interaction): return
+    
+    # تحديث الحالة في البيانات
+    bot_data['protection'][feature.value] = status
+    save_data(bot_data)
+    
+    state = "✅ مفعل" if status else "❌ معطل"
+    await interaction.response.send_message(f"تم تغيير حالة ({feature.name}) إلى: {state}", ephemeral=True)
+
 bot.run(TOKEN)
