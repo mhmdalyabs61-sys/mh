@@ -156,37 +156,26 @@ async def ban_user(guild, user, reason):
 # --- نظام الحماية المتكامل (الفوري) ---
 
 # --- مخ البوت (الذاكرة لمنع التكرار) ---
-bot_memory = set()
+# --- نظام الحماية الشامل (النسخة النهائية) ---
+_lock = set()
 
+# 1. حماية القنوات (حذف/إنشاء/تعديل)
 @bot.event
 async def on_guild_channel_delete(channel):
-    # إذا البوت هو اللي حذفها، الذاكرة بتعرف وتوقف
-    if channel.id in bot_memory:
-        bot_memory.remove(channel.id)
-        return
-        
+    _lock.add(channel.id)
     try:
-        # إعادة إنشاء القناة
-        if isinstance(channel, discord.CategoryChannel):
-            new_ch = await channel.guild.create_category(name=channel.name, position=channel.position)
-        elif isinstance(channel, discord.VoiceChannel):
-            new_ch = await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
-        else:
-            new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
-        
-        # إضافة القناة الجديدة للذاكرة عشان البوت ما يحذفها وهي توها مولودة
-        bot_memory.add(new_ch.id)
+        if isinstance(channel, discord.CategoryChannel): await channel.guild.create_category(name=channel.name, position=channel.position)
+        elif isinstance(channel, discord.VoiceChannel): await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
+        elif isinstance(channel, discord.TextChannel): await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
     except: pass
+    finally:
+        await asyncio.sleep(3)
+        if channel.id in _lock: _lock.remove(channel.id)
 
 @bot.event
 async def on_guild_channel_create(channel):
+    if channel.id in _lock: return
     if channel.name == "protection-logs": return
-    
-    # إذا كانت القناة اللي انشأت هي اللي البوت أنشأها، لا تحذفها
-    if channel.id in bot_memory:
-        bot_memory.remove(channel.id)
-        return
-        
     if not bot_data['protection'].get('channel_create', True): return
     try: await channel.delete()
     except: pass
@@ -195,32 +184,29 @@ async def on_guild_channel_create(channel):
 async def on_guild_channel_update(before, after):
     if not bot_data['protection'].get('channel_update', True): return
     if before.name == after.name: return
-    
-    try:
-        await after.edit(name=before.name)
+    try: await after.edit(name=before.name)
     except: pass
 
+# 2. حماية الرتب (حذف/إنشاء)
 @bot.event
 async def on_guild_role_delete(role):
-    if role.id in bot_memory:
-        bot_memory.remove(role.id)
-        return
-        
+    _lock.add(role.id)
     try:
         new_role = await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
-        bot_memory.add(new_role.id)
+        _lock.add(new_role.id) # قفل الرتبة الجديدة
     except: pass
+    finally:
+        await asyncio.sleep(3)
+        if role.id in _lock: _lock.remove(role.id)
 
 @bot.event
 async def on_guild_role_create(role):
-    if role.id in bot_memory:
-        bot_memory.remove(role.id)
-        return
-        
+    if role.id in _lock: return
     if not bot_data['protection'].get('role_create', True): return
     try: await role.delete()
     except: pass
 
+# 3. حماية الويب هوك
 @bot.event
 async def on_webhooks_update(channel):
     if not bot_data['protection'].get('webhook', True): return
