@@ -165,7 +165,11 @@ async def on_guild_channel_delete(channel):
             await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position)
         
         await send_log(channel.guild, f"🚨 حماية فورية: تمت استعادة القناة: {channel.name}"
-    except: pass
+        try:
+        await channel.delete()
+    except:
+        pass
+
 
 @bot.event
 async def on_guild_channel_create(channel):
