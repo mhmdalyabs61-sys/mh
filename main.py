@@ -164,7 +164,7 @@ async def on_guild_channel_delete(channel):
         elif isinstance(channel, discord.TextChannel):
             await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position)
         
-        await send_log(channel.guild, f"🚨 حماية فورية: تمت استعادة القناة: {channel.name}")
+        await send_log(channel.guild, f"🚨 حماية فورية: تمت استعادة القناة: {channel.name}"
     except: pass
 
 @bot.event
@@ -172,15 +172,15 @@ async def on_guild_channel_create(channel):
     if not bot_data['protection'].get('channel_create', True): return
     try:
         await channel.delete(reason="حماية: إنشاء قنوات غير مصرح")
-await send_log(channel.guild, f"🚨 حماية فورية: تم حذف قناة جديدة: {channel.name}")
+await send_log(channel.guild, f"🚨 حماية فورية: تم حذف قناة جديدة: {channel.name}"
         
     except: pass
 
 @bot.event
 async def on_guild_role_delete(role):
     try:
-        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
-        await send_log(role.guild, f"🚨 حماية فورية: تمت استعادة الرتبة: {role.name}")⁠
+        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)"
+        await send_log(role.guild, f" حماية فورية: تمت استعادة الرتبة: {role.name}"
     except: pass
 
 @bot.event
@@ -188,7 +188,7 @@ async def on_guild_role_create(role):
     if not bot_data['protection'].get('role_create', True): return
     try:
         await role.delete(reason="حماية: إنشاء رتب غير مصرح")
-        await send_log(role.guild, f"🚨 حماية فورية: تم حذف رتبة جديدة: {role.name}")⁠
+        await send_log(role.guild, f"🚨 حماية فورية: تم حذف رتبة جديدة: {role.name}"
     except: pass
 
 @bot.event
