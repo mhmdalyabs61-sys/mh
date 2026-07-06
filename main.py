@@ -179,7 +179,7 @@ await send_log(channel.guild, f"🚨 حماية فورية: تم حذف قناة
 @bot.event
 async def on_guild_role_delete(role):
     try:
-        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)"
+        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
         await send_log(role.guild, f" حماية فورية: تمت استعادة الرتبة: {role.name}"
     except: pass
 
