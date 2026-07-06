@@ -155,20 +155,38 @@ async def ban_user(guild, user, reason):
 
 # --- نظام الحماية المتكامل (الفوري) ---
 
+# --- مخ البوت (الذاكرة لمنع التكرار) ---
+bot_memory = set()
+
 @bot.event
 async def on_guild_channel_delete(channel):
+    # إذا البوت هو اللي حذفها، الذاكرة بتعرف وتوقف
+    if channel.id in bot_memory:
+        bot_memory.remove(channel.id)
+        return
+        
     try:
+        # إعادة إنشاء القناة
         if isinstance(channel, discord.CategoryChannel):
-            await channel.guild.create_category(name=channel.name, position=channel.position)
+            new_ch = await channel.guild.create_category(name=channel.name, position=channel.position)
         elif isinstance(channel, discord.VoiceChannel):
-            await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
-        elif isinstance(channel, discord.TextChannel):
-            await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
+            new_ch = await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
+        else:
+            new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
+        
+        # إضافة القناة الجديدة للذاكرة عشان البوت ما يحذفها وهي توها مولودة
+        bot_memory.add(new_ch.id)
     except: pass
 
 @bot.event
 async def on_guild_channel_create(channel):
     if channel.name == "protection-logs": return
+    
+    # إذا كانت القناة اللي انشأت هي اللي البوت أنشأها، لا تحذفها
+    if channel.id in bot_memory:
+        bot_memory.remove(channel.id)
+        return
+        
     if not bot_data['protection'].get('channel_create', True): return
     try: await channel.delete()
     except: pass
@@ -177,21 +195,28 @@ async def on_guild_channel_create(channel):
 async def on_guild_channel_update(before, after):
     if not bot_data['protection'].get('channel_update', True): return
     if before.name == after.name: return
+    
     try:
         await after.edit(name=before.name)
-        async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
-            if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
-                member = after.guild.get_member(entry.user.id)
-                if member: await member.edit(roles=[r for r in member.roles if r == after.guild.default_role or r.managed])
     except: pass
 
 @bot.event
 async def on_guild_role_delete(role):
-    try: await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
+    if role.id in bot_memory:
+        bot_memory.remove(role.id)
+        return
+        
+    try:
+        new_role = await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
+        bot_memory.add(new_role.id)
     except: pass
 
 @bot.event
 async def on_guild_role_create(role):
+    if role.id in bot_memory:
+        bot_memory.remove(role.id)
+        return
+        
     if not bot_data['protection'].get('role_create', True): return
     try: await role.delete()
     except: pass
