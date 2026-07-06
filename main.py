@@ -176,20 +176,18 @@ async def on_guild_channel_create(channel):
 @bot.event
 async def on_guild_channel_update(before, after):
     if not bot_data['protection'].get('channel_update', True): return
-    if before.name != after.name:
-        try:
-            await after.edit(name=before.name)
-            # سحب كل الرتب من الشخص اللي غير الاسم (حماية إضافية)
-            async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
+    if before.name == after.name: return
+    try:
+        await after.edit(name=before.name)
+        async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
+            if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
                 member = after.guild.get_member(entry.user.id)
-                if member and entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
-                    await member.edit(roles=[])
-        except: pass
+                if member: await member.edit(roles=[r for r in member.roles if r == after.guild.default_role or r.managed])
+    except: pass
 
 @bot.event
 async def on_guild_role_delete(role):
-    try:
-        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
+    try: await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
     except: pass
 
 @bot.event
