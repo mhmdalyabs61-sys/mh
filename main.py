@@ -172,7 +172,7 @@ async def on_guild_channel_create(channel):
     if not bot_data['protection'].get('channel_create', True): return
     try:
         await channel.delete(reason="حماية: إنشاء قنوات غير مصرح")
-        await send_log(channel.guild, f"🚨 حماية فورية: تم حذف قناة جديدة: {channel.name}")
+await send_log(channel.guild, f"🚨 حماية فورية: تم حذف قناة جديدة: {channel.name}")        
     except: pass
 
 @bot.event
