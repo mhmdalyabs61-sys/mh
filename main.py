@@ -151,48 +151,52 @@ async def ban_user(guild, user, reason):
 
 # --- أحداث الحماية القصوى (Events) ---
 
-# --- نظام الحماية المتكامل (بدون أي توكن) ---
-_lock = set()
+# --- نظام الحماية الاحترافي (Audit Logs Based) ---
 
-# 1. القنوات (حذف/إنشاء)
 @bot.event
 async def on_guild_channel_delete(channel):
-    _lock.add(channel.id)
+    # عند الحذف، البوت يقوم بإعادة إنشاء القناة فوراً
     try:
-        if isinstance(channel, discord.CategoryChannel): 
+        if isinstance(channel, discord.CategoryChannel):
             await channel.guild.create_category(name=channel.name, position=channel.position)
-        elif isinstance(channel, discord.VoiceChannel): 
+        elif isinstance(channel, discord.VoiceChannel):
             await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
-        else: 
+        else:
             await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
     except: pass
-    await asyncio.sleep(3)
-    if channel.id in _lock: _lock.remove(channel.id)
 
 @bot.event
 async def on_guild_channel_create(channel):
-    if channel.id in _lock or channel.name == "protection-logs": return
-    try: await channel.delete()
+    # البوت يتأكد من سجلات السيرفر (Audit Logs) لمعرفة من أنشأ القناة
+    try:
+        # الانتظار لثانية لضمان ظهور العملية في السجلات
+        await asyncio.sleep(1)
+        async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+            # إذا كان البوت هو من أنشأها، توقف
+            if entry.user.id == bot.user.id:
+                return
+            # إذا كان شخص آخر، احذفها
+            if channel.name != "protection-logs":
+                await channel.delete()
     except: pass
 
-# 2. الرتب (حذف/إنشاء)
 @bot.event
 async def on_guild_role_delete(role):
-    _lock.add(role.id)
+    # إعادة إنشاء الرتبة فوراً
     try:
-        new = await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
-        _lock.add(new.id)
+        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
     except: pass
-    await asyncio.sleep(3)
-    if role.id in _lock: _lock.remove(role.id)
 
 @bot.event
 async def on_guild_role_create(role):
-    if role.id not in _lock: 
-        try: await role.delete()
-        except: pass
+    # التحقق عبر السجلات لمنع لوب الرتب
+    try:
+        await asyncio.sleep(1)
+        async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+            if entry.user.id == bot.user.id: return
+            await role.delete()
+    except: pass
 
-# 3. الويب هوك
 @bot.event
 async def on_webhooks_update(channel):
     try:
