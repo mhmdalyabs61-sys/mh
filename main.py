@@ -154,46 +154,24 @@ import discord
 from discord.ext import commands
 import asyncio
 
-# الذاكرة الأساسية (مخزن المعلومات)
+# --- الذاكرة ---
 server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
-# قفل ذكي: أي ID هنا يعني البوت هو اللي سواه، فلا تحذفه
-processing = set()
+processing = set() # القفل الذكي
 
-# دالة الحفظ الشاملة (تغطي كل شيء)
+# --- دالة الحفظ الشامل ---
 async def full_save(guild):
-    # حفظ الرتب
     server_snapshot['roles'] = {r.id: {'name': r.name, 'permissions': r.permissions.value, 'color': r.color.value, 'position': r.position} for r in guild.roles if not r.managed and r.name != "@everyone"}
-    # حفظ القنوات
     server_snapshot['channels'] = {c.id: {'name': c.name, 'type': str(c.type), 'category_id': c.category_id, 'position': c.position} for c in guild.channels}
-    # حفظ الويب هوك
     try:
         server_snapshot['webhooks'] = {w.id: {'name': w.name, 'channel_id': w.channel.id} for w in await guild.webhooks()}
     except: pass
 
-# --- الحماية (حذف ما هو غير مصرح به) ---
-@bot.event
-async def on_guild_channel_create(channel):
-    if channel.id in processing: processing.remove(channel.id); return
-    await channel.delete(reason="حماية: تم إنشاء قناة غير مصرح بها")
+# --- القفل الذكي (إزالة تلقائية) ---
+async def safe_unlock(item_id):
+    await asyncio.sleep(5)
+    if item_id in processing: processing.remove(item_id)
 
-@bot.event
-async def on_guild_role_create(role):
-    if role.id in processing: processing.remove(role.id); return
-    await role.delete(reason="حماية: تم إنشاء رتبة غير مصرح بها")
-
-@bot.event
-async def on_webhooks_update(channel):
-    # مراقبة أي تغيير في الويب هوك
-    current_webhooks = {w.id for w in await channel.guild.webhooks()}
-    for wh_id in list(server_snapshot['webhooks'].keys()):
-        if wh_id not in current_webhooks: # إذا انحذف ويب هوك، لا نحتاج إرجاعه (لأن المخرب يستخدمه)
-            pass 
-    # حذف أي ويب هوك جديد غريب
-    for w in await channel.guild.webhooks():
-        if w.id not in server_snapshot['webhooks'] and w.id not in processing:
-            await w.delete(reason="حماية: ويب هوك غير مصرح به")
-
-# --- الحماية (إرجاع ما حُذف) ---
+# --- أحداث الحماية (الحذف والاستعادة) ---
 @bot.event
 async def on_guild_channel_delete(channel):
     data = server_snapshot['channels'].get(channel.id)
@@ -202,6 +180,7 @@ async def on_guild_channel_delete(channel):
         new_ch = await (channel.guild.create_voice_channel if data['type'] == 'voice' else channel.guild.create_text_channel)(
             name=data['name'], category=cat, position=data['position'])
         processing.add(new_ch.id)
+        asyncio.create_task(safe_unlock(new_ch.id))
 
 @bot.event
 async def on_guild_role_delete(role):
@@ -210,23 +189,52 @@ async def on_guild_role_delete(role):
         new_role = await role.guild.create_role(name=data['name'], permissions=discord.Permissions(data['permissions']), color=discord.Color(data['color']))
         await new_role.edit(position=data['position'])
         processing.add(new_role.id)
+        asyncio.create_task(safe_unlock(new_role.id))
 
-# --- التحديث والأمر اليدوي ---
+# --- أحداث الحماية (الإنشاء والتغيير) ---
 @bot.event
-async def on_guild_channel_update(before, after): await full_save(after.guild)
-@bot.event
-async def on_guild_role_update(before, after): await full_save(after.guild)
+async def on_guild_channel_create(channel):
+    if channel.id in processing: return
+    await channel.delete()
 
+@bot.event
+async def on_guild_role_create(role):
+    if role.id in processing: return
+    await role.delete()
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    # حماية الاسم: إذا تغير الاسم يعيده فوراً
+    if before.name != after.name:
+        await after.edit(name=before.name)
+
+@bot.event
+async def on_guild_role_update(before, after):
+    # حماية الاسم: إذا تغير الاسم يعيده فوراً
+    if before.name != after.name:
+        await after.edit(name=before.name)
+
+@bot.event
+async def on_webhooks_update(channel):
+    # حماية الويب هوك: حذف أي ويب هوك جديد مشبوه
+    current_whs = await channel.guild.webhooks()
+    for wh in current_whs:
+        if wh.id not in server_snapshot['webhooks'] and wh.id not in processing:
+            await wh.delete()
+
+# --- أمر التحديث اليدوي ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def test(ctx):
     await full_save(ctx.guild)
-    await ctx.send(f"✅ تم حفظ: {len(server_snapshot['channels'])} قناة، {len(server_snapshot['roles'])} رتبة، و {len(server_snapshot['webhooks'])} ويب هوك.")
+    await ctx.send("✅ تم تحديث النسخة الاحتياطية (شامل القنوات، الرتب، والويب هوك).")
 
 @bot.event
 async def on_ready():
     for guild in bot.guilds: await full_save(guild)
-    print("✅ نظام الحماية الشاملة يعمل بكامل طاقته.")
+    print("✅ نظام الحماية الكامل نشط.")
+
+
 
 
 
