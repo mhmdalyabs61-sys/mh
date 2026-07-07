@@ -167,12 +167,32 @@ async def on_guild_channel_delete(channel):
 
 # --- نظام حماية الرتب (الحارس الصارم) ---
 
+# هذا الكود يمنع التكرار (Loop) عن طريق التحقق من هوية الشخص
 @bot.event
 async def on_guild_role_create(role):
-    try:
-        await role.delete()
-    except:
-        pass
+    # ننتظر قليلاً لضمان تسجيل الحدث في سجلات ديسكورد
+    import asyncio
+    await asyncio.sleep(1)
+    
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+        # إذا كان البوت هو من أنشأ الرتبة، لا نفعل شيئاً (نخرج من الدالة)
+        if entry.user.id == bot.user.id:
+            return
+        
+        # إذا كان شخص آخر، نحذف الرتبة
+        try:
+            await role.delete(reason="حماية: تم إنشاء رتبة بدون صلاحية.")
+            print(f"تم حذف رتبة غير مخولة أنشأها: {entry.user.name}")
+        except discord.Forbidden:
+            print("خطأ: لا أملك صلاحية حذف الرتب.")
+        break
+
+@bot.event
+async def on_guild_role_delete(role):
+    # هذا الحدث للحماية من حذف الرتب الموجودة بالفعل
+    # لا تضع فيه كود لإعادة إنشاء الرتبة لأنك ستقع في الحلقة المفرغة التي تشتكي منها
+    print(f"تم حذف رتبة: {role.name}")
+
 
 
 
