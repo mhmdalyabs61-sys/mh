@@ -169,23 +169,11 @@ async def on_guild_channel_delete(channel):
 
 @bot.event
 async def on_guild_role_create(role):
-    # انتظر ثانية للتأكد أن سجلات ديسكورد (Audit Logs) سجلت العملية
-    await asyncio.sleep(1)
-    
     try:
-        # البحث في سجلات السيرفر عن الشخص الذي أنشأ الرتبة
-        async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-            
-            # 1. إذا كان البوت هو من أنشأها، لا تفعل شيئاً (اخرج)
-            if entry.user.id == bot.user.id:
-                return
-            
-            # 2. إذا كان أي شخص آخر، احذف الرتبة فوراً
-            await role.delete()
-            print(f"✅ تم حذف رتبة غير مصرح بها أنشأها: {entry.user}")
-            
-    except Exception as e:
-        print(f"❌ حدث خطأ في حماية الرتب: {e}")
+        await role.delete()
+    except:
+        pass
+
 
 
 # --- نظام حماية الرتب (الحصين) ---
