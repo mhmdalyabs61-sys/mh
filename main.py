@@ -164,48 +164,68 @@ async def queue_task(coro):
             await asyncio.sleep(e.retry_after)
             await coro
 
-# --- الحماية الشاملة بالتوازي ---
+import asyncio
+import discord
+
+# --- نظام القفل الذكي (يمنع البوت من التداخل مع نفسه) ---
+locks = {}
+
+async def queue_task(target_id, coro):
+    """ينفذ المهمة مع معالجة طلبات ديسكورد وحماية القفل"""
+    try:
+        await coro
+    except discord.HTTPException as e:
+        if e.status == 429:
+            await asyncio.sleep(e.retry_after)
+            await coro
+    finally:
+        # إزالة القفل بعد انتهاء المهمة (5 ثوانٍ كافية للاستقرار)
+        await asyncio.sleep(5)
+        locks.pop(target_id, None)
+
+# --- الدوال الشاملة ---
 
 @bot.event
 async def on_guild_channel_delete(channel):
-    if not bot_data['protection'].get('channel_del', True): return
-    # استعادة القناة فوراً وبأمان
+    if not bot_data['protection'].get('channel_del', True) or locks.get(channel.id): return
+    locks[channel.id] = True
     coro = channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites) if not isinstance(channel, discord.VoiceChannel) else channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites)
-    asyncio.create_task(queue_task(coro))
+    asyncio.create_task(queue_task(channel.id, coro))
 
 @bot.event
 async def on_guild_channel_create(channel):
-    if not bot_data['protection'].get('channel_create', True): return
+    if channel.id in locks or not bot_data['protection'].get('channel_create', True): return
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
         if entry.user.id != bot.user.id:
-            asyncio.create_task(queue_task(channel.delete(reason="حماية: إنشاء غير مصرح")))
+            asyncio.create_task(queue_task(channel.id, channel.delete(reason="حماية: إنشاء غير مصرح")))
         break
 
 @bot.event
 async def on_guild_role_delete(role):
-    if not bot_data['protection'].get('role_del', True): return
+    if not bot_data['protection'].get('role_del', True) or locks.get(role.id): return
+    locks[role.id] = True
     coro = role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color, hoist=role.hoist, mentionable=role.mentionable)
-    asyncio.create_task(queue_task(coro))
+    asyncio.create_task(queue_task(role.id, coro))
 
 @bot.event
 async def on_guild_role_create(role):
-    if not bot_data['protection'].get('role_create', True): return
+    if role.id in locks or not bot_data['protection'].get('role_create', True): return
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
         if entry.user.id != bot.user.id:
-            asyncio.create_task(queue_task(role.delete(reason="حماية: إنشاء غير مصرح")))
+            asyncio.create_task(queue_task(role.id, role.delete(reason="حماية: إنشاء غير مصرح")))
         break
 
 @bot.event
 async def on_guild_channel_update(before, after):
     if not bot_data['protection'].get('channel_update', True): return
     if before.name != after.name:
-        asyncio.create_task(queue_task(after.edit(name=before.name)))
+        asyncio.create_task(queue_task(after.id, after.edit(name=before.name)))
 
 @bot.event
 async def on_guild_role_update(before, after):
     if not bot_data['protection'].get('role_update', True): return
     if before.name != after.name or before.permissions != after.permissions:
-        asyncio.create_task(queue_task(after.edit(name=before.name, permissions=before.permissions)))
+        asyncio.create_task(queue_task(after.id, after.edit(name=before.name, permissions=before.permissions)))
 
 @bot.event
 async def on_webhooks_update(channel):
@@ -213,8 +233,9 @@ async def on_webhooks_update(channel):
     try:
         webhooks = await channel.webhooks()
         for wh in webhooks:
-            asyncio.create_task(queue_task(wh.delete(reason="حماية: ويب هوك غير مصرح")))
+            asyncio.create_task(queue_task(wh.id, wh.delete(reason="حماية: ويب هوك غير مصرح")))
     except: pass
+
 
 
 
