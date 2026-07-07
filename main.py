@@ -155,16 +155,7 @@ async def ban_user(guild, user, reason):
 import asyncio
 import discord
 
-# خريطة السيرفر الدائمة
-server_snapshot = {'channels': {}, 'roles': {}}
 
-async def save_snapshot(guild):
-    """تحديث قاعدة البيانات الداخلية للسيرفر"""
-    server_snapshot['roles'] = {r.id: {'name': r.name, 'permissions': r.permissions, 'color': r.color, 'hoist': r.hoist, 'mentionable': r.mentionable} 
-                                for r in guild.roles if not r.managed and r.name != "@everyone"}
-    
-    server_snapshot['channels'] = {ch.id: {'name': ch.name, 'type': str(ch.type), 'category': ch.category_id, 'position': ch.position, 'overwrites': ch.overwrites} 
-                                   for ch in guild.channels}
 
 # --- تشغيل النسخ عند فتح البوت ---
 @bot.event
