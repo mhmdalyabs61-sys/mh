@@ -155,10 +155,12 @@ async def ban_user(guild, user, reason):
 
 # --- نظام الحماية الشامل والكامل ---
 
+# --- نظام الحماية الشامل والكامل ---
+
 @bot.event
 async def on_guild_channel_create(channel):
     if not bot_data['protection'].get('channel_create', True): return
-    await asyncio.sleep(1)
+    await asyncio.sleep(1.5)
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
         if entry.user.id == bot.user.id: return
         try: await channel.delete(reason="حماية: تم إنشاء قناة.")
@@ -177,6 +179,7 @@ async def on_guild_channel_delete(channel):
 @bot.event
 async def on_guild_channel_update(before, after):
     if not bot_data['protection'].get('channel_update', True): return
+    # حماية تغيير اسم القناة
     if before.name != after.name:
         try: await after.edit(name=before.name)
         except: pass
@@ -184,7 +187,7 @@ async def on_guild_channel_update(before, after):
 @bot.event
 async def on_guild_role_create(role):
     if not bot_data['protection'].get('role_create', True): return
-    await asyncio.sleep(1)
+    await asyncio.sleep(1.5)
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
         if entry.user.id == bot.user.id: return
         try: await role.delete(reason="حماية: تم إنشاء رتبة.")
@@ -199,12 +202,21 @@ async def on_guild_role_delete(role):
     except: pass
 
 @bot.event
+async def on_guild_role_update(before, after):
+    if not bot_data['protection'].get('role_create', True): return # نستخدم نفس مفتاح الحماية أو يمكنك إضافة مفتاح جديد
+    # حماية تغيير اسم الرتبة
+    if before.name != after.name:
+        try: await after.edit(name=before.name)
+        except: pass
+
+@bot.event
 async def on_webhooks_update(channel):
     if not bot_data['protection'].get('webhook', True): return
     try:
         webhooks = await channel.webhooks()
         for wh in webhooks: await wh.delete()
     except: pass
+
 
 
 
