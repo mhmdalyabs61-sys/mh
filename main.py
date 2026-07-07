@@ -155,43 +155,37 @@ async def ban_user(guild, user, reason):
 
 # --- نظام الحماية الشامل والكامل ---
 
-# --- نظام الحماية الشامل والكامل ---
+# --- نظام الحماية المركزي المعتمد ---
 
 @bot.event
 async def on_guild_channel_create(channel):
     if not bot_data['protection'].get('channel_create', True): return
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(0.5)
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
         if entry.user.id == bot.user.id: return
-        try: await channel.delete(reason="حماية: تم إنشاء قناة.")
-        except: pass
+        await channel.delete(reason="حماية: تم إنشاء قناة بدون صلاحية.")
         break
 
 @bot.event
 async def on_guild_channel_delete(channel):
     if not bot_data['protection'].get('channel_del', True): return
     try:
-        if isinstance(channel, discord.CategoryChannel): await channel.guild.create_category(name=channel.name, position=channel.position)
-        elif isinstance(channel, discord.VoiceChannel): await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
-        else: await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position)
+        new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category) if not isinstance(channel, discord.VoiceChannel) else await channel.guild.create_voice_channel(name=channel.name, category=channel.category)
+        await new_ch.edit(position=channel.position)
     except: pass
 
 @bot.event
 async def on_guild_channel_update(before, after):
     if not bot_data['protection'].get('channel_update', True): return
-    # حماية تغيير اسم القناة
-    if before.name != after.name:
-        try: await after.edit(name=before.name)
-        except: pass
+    if before.name != after.name: await after.edit(name=before.name)
 
 @bot.event
 async def on_guild_role_create(role):
     if not bot_data['protection'].get('role_create', True): return
-    await asyncio.sleep(1.5)
+    await asyncio.sleep(0.5)
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
         if entry.user.id == bot.user.id: return
-        try: await role.delete(reason="حماية: تم إنشاء رتبة.")
-        except: pass
+        await role.delete(reason="حماية: تم إنشاء رتبة.")
         break
 
 @bot.event
@@ -203,19 +197,14 @@ async def on_guild_role_delete(role):
 
 @bot.event
 async def on_guild_role_update(before, after):
-    if not bot_data['protection'].get('role_create', True): return # نستخدم نفس مفتاح الحماية أو يمكنك إضافة مفتاح جديد
-    # حماية تغيير اسم الرتبة
-    if before.name != after.name:
-        try: await after.edit(name=before.name)
-        except: pass
+    if before.name != after.name: await after.edit(name=before.name)
 
 @bot.event
 async def on_webhooks_update(channel):
     if not bot_data['protection'].get('webhook', True): return
-    try:
-        webhooks = await channel.webhooks()
-        for wh in webhooks: await wh.delete()
-    except: pass
+    webhooks = await channel.webhooks()
+    for wh in webhooks: await wh.delete()
+
 
 
 
