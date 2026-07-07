@@ -154,10 +154,9 @@ import discord
 from discord.ext import commands
 import asyncio
 
-# الذاكرة (مخزن البيانات)
+# الذاكرة الأساسية
 server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
-# القائمة البيضاء (أمان من الحذف الذاتي)
-whitelist = set()
+whitelist = set() # القائمة البيضاء للأشياء التي أنشأها البوت
 
 # --- دالة الحفظ الشامل ---
 async def full_save(guild):
@@ -167,7 +166,7 @@ async def full_save(guild):
         server_snapshot['webhooks'] = {w.id: {'name': w.name, 'channel_id': w.channel.id} for w in await guild.webhooks()}
     except: pass
 
-# --- الحماية (الاستعادة) ---
+# --- الحماية من الحذف (الاستعادة) ---
 @bot.event
 async def on_guild_channel_delete(channel):
     data = server_snapshot['channels'].get(channel.id)
@@ -189,47 +188,49 @@ async def on_guild_role_delete(role):
         await asyncio.sleep(5)
         whitelist.discard(new_role.id)
 
-# --- الحماية (حذف الغريب) ---
+# --- الحماية من الإنشاء (بواسطة Audit Logs) ---
 @bot.event
 async def on_guild_channel_create(channel):
     if channel.id in whitelist: return
-    await channel.delete(reason="حماية: تم إنشاء قناة غير مصرح بها")
+    await asyncio.sleep(0.5) # انتظار تسجيل الحدث
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        if entry.user.id != bot.user.id:
+            await channel.delete(reason="حماية: تم إنشاء قناة غير مصرح بها")
+        break
 
 @bot.event
 async def on_guild_role_create(role):
     if role.id in whitelist: return
-    await role.delete(reason="حماية: تم إنشاء رتبة غير مصرح بها")
+    await asyncio.sleep(0.5)
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+        if entry.user.id != bot.user.id:
+            await role.delete(reason="حماية: تم إنشاء رتبة غير مصرح بها")
+        break
 
+# --- حماية الويب هوك والأسماء ---
 @bot.event
 async def on_webhooks_update(channel):
-    for w in await channel.guild.webhooks():
-        if w.id not in server_snapshot['webhooks'] and w.id not in whitelist:
-            await w.delete(reason="حماية: ويب هوك غير مصرح به")
+    current_whs = await channel.guild.webhooks()
+    for wh in current_whs:
+        if wh.id not in server_snapshot['webhooks'] and wh.id not in whitelist:
+            await wh.delete()
 
-# --- التحديث التلقائي للأسماء ---
 @bot.event
 async def on_guild_channel_update(before, after):
     if before.name != after.name: await after.edit(name=before.name)
     await full_save(after.guild)
 
-@bot.event
-async def on_guild_role_update(before, after):
-    if before.name != after.name: await after.edit(name=before.name)
-    await full_save(after.guild)
-
-# --- أمر التحديث اليدوي ---
+# --- أمر التحديث ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def test(ctx):
     await full_save(ctx.guild)
-    await ctx.send("✅ تم تحديث بيانات الحماية (القنوات، الرتب، الويب هوك).")
+    await ctx.send("✅ تم تحديث بيانات الحماية الشاملة.")
 
 @bot.event
 async def on_ready():
     for guild in bot.guilds: await full_save(guild)
-    print("✅ نظام الحماية فعال.")
-
-
+    print("✅ الحماية الشاملة نشطة.")
 
 
 
