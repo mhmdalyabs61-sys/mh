@@ -180,20 +180,33 @@ async def on_guild_channel_create(channel):
                 await channel.delete()
     except: pass
 
+# --- نظام حماية الرتب (الحصين) ---
+
 @bot.event
 async def on_guild_role_delete(role):
-    # إعادة إنشاء الرتبة فوراً
+    # عند حذف رتبة، البوت يعيد إنشاءها
     try:
-        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
+        new_role = await role.guild.create_role(
+            name=role.name, 
+            permissions=role.permissions, 
+            color=role.color,
+            hoist=role.hoist,
+            mentionable=role.mentionable
+        )
+        # هنا البوت يعرف أنها رتبته الخاصة، فلا يحذفها لاحقاً
     except: pass
 
 @bot.event
 async def on_guild_role_create(role):
-    # التحقق عبر السجلات لمنع لوب الرتب
+    # تجاهل الرتب التي ينشئها البوت نفسه (باستخدام ID)
+    # أو نستخدم شرطاً بسيطاً: إذا كان البوت هو المنشئ في السجل
     try:
-        await asyncio.sleep(1)
+        await asyncio.sleep(1) # ننتظر قليلاً ليحدث سجل التدقيق
         async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-            if entry.user.id == bot.user.id: return
+            if entry.user.id == bot.user.id:
+                return # إذا أنا (البوت) اللي سويتها، لا تحذفها!
+            
+            # إذا شخص ثاني سواها، احذفها
             await role.delete()
     except: pass
 
