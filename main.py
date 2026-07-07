@@ -166,52 +166,36 @@ async def ban_user(guild, user, reason):
     except: pass
 
 
-import discord
-from discord.ext import commands
-import asyncio
+# --- الكود المدمج (Snapshot + Security + Logs + Handlers) ---
 
-# --- 1. تعريف الذاكرة ---
+# 1. تعريف المتغيرات (تأكد أن هذه المتغيرات غير معرفة مرتين في ملفك)
 server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
-whitelist = set()
-bot_data = {
-    'whitelisted': [], 
-    'protection': {'channel_del': True, 'channel_create': True, 'role_del': True, 'role_create': True, 'webhook': True}
-}
 
-# --- 2. دالة اللوق بنظام الإيمبيد ---
-async def send_log_embed(guild, title, desc, user, action, status):
-    log_channel = guild.system_channel # يمكنك تغييرها لـ channel ID محدد
-    if log_channel:
-        embed = discord.Embed(title=f"🛡️ {title}", description=desc, color=discord.Color.red())
-        embed.add_field(name="👤 الفاعل", value=f"**{user.name}**\n(`{user.id}`)", inline=True)
-        embed.add_field(name="⚙️ الإجراء", value=action, inline=True)
-        embed.add_field(name="✅ الحالة", value=status, inline=True)
-        embed.set_footer(text="نظام الحماية الذكي | Protect System")
-        await log_channel.send(embed=embed)
-
-# --- 3. الدوال والأحداث ---
+# 2. الدوال الأساسية والمدمجة
 async def full_save(guild):
     server_snapshot['roles'] = {r.id: {'name': r.name, 'permissions': r.permissions.value, 'color': r.color.value, 'position': r.position} for r in guild.roles if not r.managed and r.name != "@everyone"}
     server_snapshot['channels'] = {c.id: {'name': c.name, 'type': str(c.type), 'category_id': c.category_id, 'position': c.position} for c in guild.channels}
     server_snapshot['webhooks'] = {w.id: {'name': w.name, 'channel_id': w.channel.id} for w in await guild.webhooks()}
 
-@bot.command(name="update")
-@commands.has_permissions(administrator=True)
-async def update_snapshot(ctx):
-    await full_save(ctx.guild)
-    embed = discord.Embed(title="✅ تحديث الذاكرة", description="تم تحديث الـ Snapshot بنجاح واعتماده كحالة أصلية.", color=discord.Color.green())
-    await ctx.send(embed=embed)
+async def send_log_embed(guild, title, desc, user, action, status):
+    # نستخدم ensure_log_channel اللي عندك عشان ما نكرر الكود
+    channel = await ensure_log_channel(guild)
+    if channel:
+        embed = discord.Embed(title=f"🛡️ {title}", description=desc, color=discord.Color.red())
+        embed.add_field(name="👤 الفاعل", value=f"{user.name}", inline=True)
+        embed.add_field(name="⚙️ الإجراء", value=action, inline=True)
+        embed.add_field(name="✅ الحالة", value=status, inline=True)
+        await channel.send(embed=embed)
 
+# 3. الأحداث (Events) - الحماية المتكاملة
 @bot.event
 async def on_guild_channel_delete(channel):
+    if not bot_data.get('protection', {}).get('channel_del', True): return
     data = server_snapshot['channels'].get(channel.id)
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.user.id not in bot_data['whitelisted'] and entry.user.id != bot.user.id:
-            try: 
-                await channel.guild.ban(entry.user, reason="تخريب: حذف قنوات"); status = "تم التبنيـد"
-            except: 
-                status = "فشل التبنيـد (صلاحيات)"
-            
+        if entry.user.id not in bot_data.get('whitelisted', []) and entry.user.id != bot.user.id:
+            try: await channel.guild.ban(entry.user, reason="تخريب"); status = "تم التبنيـد"
+            except: status = "فشل التبنيـد"
             if data:
                 cat = channel.guild.get_channel(data['category_id'])
                 new = await (channel.guild.create_voice_channel if data['type'] == 'voice' else channel.guild.create_text_channel)(name=data['name'], category=cat, position=data['position'])
@@ -221,7 +205,7 @@ async def on_guild_channel_delete(channel):
 
 @bot.event
 async def on_webhooks_update(channel):
-    if bot_data['protection'].get('webhook'):
+    if bot_data.get('protection', {}).get('webhook', True):
         for wh in await channel.guild.webhooks():
             if wh.id not in server_snapshot['webhooks'] and wh.id not in whitelist:
                 await wh.delete()
@@ -229,9 +213,33 @@ async def on_webhooks_update(channel):
     await full_save(channel.guild)
 
 @bot.event
+async def on_guild_role_delete(role):
+    if not bot_data.get('protection', {}).get('role_del', True): return
+    data = server_snapshot['roles'].get(role.id)
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+        if entry.user.id not in bot_data.get('whitelisted', []) and entry.user.id != bot.user.id:
+            try: await role.guild.ban(entry.user, reason="تخريب"); status = "تم التبنيـد"
+            except: status = "فشل التبنيـد"
+            if data:
+                new = await role.guild.create_role(name=data['name'], permissions=discord.Permissions(data['permissions']), color=discord.Color(data['color']))
+                await new.edit(position=data['position'])
+            await send_log_embed(role.guild, "حذف رتبة", f"تم استرجاع: {data['name']}", entry.user, "استرجاع + تبنيد", status)
+        else: await full_save(role.guild)
+        break
+
+# 4. الأمر اليدوي (لتحديث الـ Snapshot)
+@bot.command(name="update")
+@commands.has_permissions(administrator=True)
+async def update_snapshot(ctx):
+    await full_save(ctx.guild)
+    await ctx.send("✅ تم تحديث الـ Snapshot بنجاح.")
+
+# 5. التحديث عند التشغيل
+@bot.event
 async def on_ready():
     for guild in bot.guilds: await full_save(guild)
-    print("✅ الحماية مفعلة مع نظام الإيمبيد.")
+    print("✅ الحماية والـ Snapshot يعملان بكامل الطاقة.")
+
 
 
 
