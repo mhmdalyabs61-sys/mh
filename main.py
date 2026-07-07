@@ -150,87 +150,96 @@ async def ban_user(guild, user, reason):
     except: pass
 
 
-import discord
-from discord.ext import commands
-import asyncio
+# --- دالة الحماية الشاملة المجمعة ---
 
-# الذاكرة الأساسية
-server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
-whitelist = set() # القائمة البيضاء للأشياء التي أنشأها البوت
-
-# --- دالة الحفظ الشامل ---
-async def full_save(guild):
-    server_snapshot['roles'] = {r.id: {'name': r.name, 'permissions': r.permissions.value, 'color': r.color.value, 'position': r.position} for r in guild.roles if not r.managed and r.name != "@everyone"}
-    server_snapshot['channels'] = {c.id: {'name': c.name, 'type': str(c.type), 'category_id': c.category_id, 'position': c.position} for c in guild.channels}
-    try:
-        server_snapshot['webhooks'] = {w.id: {'name': w.name, 'channel_id': w.channel.id} for w in await guild.webhooks()}
-    except: pass
-
-# --- الحماية من الحذف (الاستعادة) ---
-@bot.event
-async def on_guild_channel_delete(channel):
-    data = server_snapshot['channels'].get(channel.id)
-    if data:
-        cat = channel.guild.get_channel(data['category_id'])
-        new_ch = await (channel.guild.create_voice_channel if data['type'] == 'voice' else channel.guild.create_text_channel)(
-            name=data['name'], category=cat, position=data['position'])
-        whitelist.add(new_ch.id)
-        await asyncio.sleep(5)
-        whitelist.discard(new_ch.id)
-
-@bot.event
-async def on_guild_role_delete(role):
-    data = server_snapshot['roles'].get(role.id)
-    if data:
-        new_role = await role.guild.create_role(name=data['name'], permissions=discord.Permissions(data['permissions']), color=discord.Color(data['color']))
-        await new_role.edit(position=data['position'])
-        whitelist.add(new_role.id)
-        await asyncio.sleep(5)
-        whitelist.discard(new_role.id)
-
-# --- الحماية من الإنشاء (بواسطة Audit Logs) ---
-@bot.event
-async def on_guild_channel_create(channel):
-    if channel.id in whitelist: return
-    await asyncio.sleep(0.5) # انتظار تسجيل الحدث
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.user.id != bot.user.id:
-            await channel.delete(reason="حماية: تم إنشاء قناة غير مصرح بها")
-        break
-
-@bot.event
-async def on_guild_role_create(role):
-    if role.id in whitelist: return
-    await asyncio.sleep(0.5)
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-        if entry.user.id != bot.user.id:
-            await role.delete(reason="حماية: تم إنشاء رتبة غير مصرح بها")
-        break
-
-# --- حماية الويب هوك والأسماء ---
+# 1. حماية الويب هوك (حذف أي ويب هوك مشبوه)
 @bot.event
 async def on_webhooks_update(channel):
+    if not bot_data['protection'].get('webhook', True): return
     current_whs = await channel.guild.webhooks()
     for wh in current_whs:
         if wh.id not in server_snapshot['webhooks'] and wh.id not in whitelist:
             await wh.delete()
+            await send_log_embed(channel.guild, "🚨 ويب هوك غير مصرح به", f"تم حذف ويب هوك في {channel.name}", discord.Color.red(), channel.guild.me, "حذف", "تم")
 
+# 2. حماية الأسماء (إعادة الاسم الأصلي إذا تم تغييره)
 @bot.event
 async def on_guild_channel_update(before, after):
-    if before.name != after.name: await after.edit(name=before.name)
+    if not bot_data['protection'].get('channel_update', True): return
+    if before.name != after.name:
+        await after.edit(name=before.name)
+        await send_log_embed(after.guild, "⚠️ تعديل قناة", f"تمت محاولة تغيير اسم {before.name}", discord.Color.gold(), after.guild.me, "إرجاع الاسم", "تم")
     await full_save(after.guild)
 
-# --- أمر التحديث ---
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def test(ctx):
-    await full_save(ctx.guild)
-    await ctx.send("✅ تم تحديث بيانات الحماية الشاملة.")
+@bot.event
+async def on_guild_role_update(before, after):
+    if before.name != after.name:
+        await after.edit(name=before.name)
+        await send_log_embed(after.guild, "⚠️ تعديل رتبة", f"تمت محاولة تغيير اسم {before.name}", discord.Color.gold(), after.guild.me, "إرجاع الاسم", "تم")
+    await full_save(after.guild)
+
+# 3. دالة فتح القفل الآمن (تمنع البوت من حذف ما أنشأه)
+async def safe_unlock(item_id):
+    await asyncio.sleep(10)
+    whitelist.discard(item_id)
+
+# 4. الحماية من الحذف والاستعادة (مع الباند واللوق)
+@bot.event
+async def on_guild_channel_delete(channel):
+    if not bot_data['protection'].get('channel_del', True): return
+    data = server_snapshot['channels'].get(channel.id)
+    if data:
+        async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+            if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
+                try: await channel.guild.ban(entry.user, reason="حذف قنوات")
+                except: pass
+                cat = channel.guild.get_channel(data['category_id'])
+                new_ch = await (channel.guild.create_voice_channel if data['type'] == 'voice' else channel.guild.create_text_channel)(
+                    name=data['name'], category=cat, position=data['position'])
+                whitelist.add(new_ch.id)
+                asyncio.create_task(safe_unlock(new_ch.id))
+                await send_log_embed(channel.guild, "⚠️ حذف قناة", f"تم استعادة: {data['name']}", discord.Color.orange(), entry.user, "استرجاع + تبنيد", "تم")
+            break
 
 @bot.event
-async def on_ready():
-    for guild in bot.guilds: await full_save(guild)
-    print("✅ الحماية الشاملة نشطة.")
+async def on_guild_role_delete(role):
+    if not bot_data['protection'].get('role_del', True): return
+    data = server_snapshot['roles'].get(role.id)
+    if data:
+        async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+            if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
+                try: await role.guild.ban(entry.user, reason="حذف رتب")
+                except: pass
+                new_role = await role.guild.create_role(name=data['name'], permissions=discord.Permissions(data['permissions']), color=discord.Color(data['color']))
+                await new_role.edit(position=data['position'])
+                whitelist.add(new_role.id)
+                asyncio.create_task(safe_unlock(new_role.id))
+                await send_log_embed(role.guild, "⚠️ حذف رتبة", f"تم استعادة: {data['name']}", discord.Color.orange(), entry.user, "استرجاع + تبنيد", "تم")
+            break
+
+# 5. الحماية من الإنشاء غير المصرح به
+@bot.event
+async def on_guild_channel_create(channel):
+    if not bot_data['protection'].get('channel_create', True) or channel.id in whitelist: return
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
+            try: await channel.guild.ban(entry.user, reason="إنشاء قنوات")
+            except: pass
+            await channel.delete()
+            await send_log_embed(channel.guild, "🚨 إنشاء قناة", f"تم حذف: {channel.name}", discord.Color.red(), entry.user, "حذف + تبنيد", "تم")
+        break
+
+@bot.event
+async def on_guild_role_create(role):
+    if not bot_data['protection'].get('role_create', True) or role.id in whitelist: return
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+        if entry.user.id != bot.user.id and entry.user.id not in bot_data['whitelisted']:
+            try: await role.guild.ban(entry.user, reason="إنشاء رتب")
+            except: pass
+            await role.delete()
+            await send_log_embed(role.guild, "🚨 إنشاء رتبة", f"تم حذف: {role.name}", discord.Color.red(), entry.user, "حذف + تبنيد", "تم")
+        break
+
 
 
 
