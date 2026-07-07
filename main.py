@@ -165,6 +165,27 @@ async def on_guild_channel_delete(channel):
             await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
     except: pass
 
+@bot.event
+async def on_guild_channel_create(channel):
+    # ننتظر ثانية واحدة لضمان توفر بيانات السجل
+    import asyncio
+    await asyncio.sleep(1)
+    
+    # التحقق من سجلات التدقيق لمعرفة من أنشأ القناة
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        # إذا كان البوت هو من أنشأ القناة، لا نفعل شيئاً
+        if entry.user.id == bot.user.id:
+            return
+            
+        # إذا كان مستخدم آخر، نقوم بالحذف
+        try:
+            await channel.delete(reason="حماية: تم إنشاء قناة بدون صلاحية.")
+            print(f"تم حذف قناة أنشأها المستخدم: {entry.user.name}")
+        except discord.Forbidden:
+            print("خطأ: البوت لا يملك صلاحية حذف القنوات!")
+        break
+
+
 # --- نظام حماية الرتب (الحارس الصارم) ---
 
 # هذا الكود يمنع التكرار (Loop) عن طريق التحقق من هوية الشخص
