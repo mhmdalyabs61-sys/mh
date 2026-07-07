@@ -149,27 +149,26 @@ async def ban_user(guild, user, reason):
         await send_log(guild, f"🔨 **تم تبنيد** {user.mention} | السبب: {reason}")
     except: pass
 
+-
 @bot.command()
-async def test_snapshot(ctx):
+async def test(ctx):
+    # حفظ الحالة الحالية
     await save_snapshot(ctx.guild)
-    await ctx.send(f"تم حفظ {len(server_snapshot['channels'])} قناة في الذاكرة.")
+    
+    # رسالة تأكيد احترافية
+    embed = discord.Embed(
+        title="✅ تم تحديث النسخة الاحتياطية",
+        description=f"تم حفظ:\n**{len(server_snapshot['channels'])}** قناة\n**{len(server_snapshot['roles'])}** رتبة\n**{len(server_snapshot['webhooks'])}** ويب هوك",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed)
 
 
-
-# --- [ابدأ من هنا] ---
-
-# 1. تعريف الذاكرة المؤقتة لنظام الحماية
-server_snapshot = {'channels': {}, 'roles': {}}
+# --- إعدادات الحماية والذاكرة ---
+server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
 processing_events = set()
 
-# 2. دالة حفظ حالة السيرفر الحالية
-async def save_snapshot(guild):
-    server_snapshot['roles'] = {r.id: {'name': r.name, 'permissions': r.permissions, 'color': r.color, 'hoist': r.hoist, 'mentionable': r.mentionable} 
-                                for r in guild.roles if not r.managed and r.name != "@everyone"}
-    server_snapshot['channels'] = {ch.id: {'name': ch.name, 'type': str(ch.type), 'category': ch.category_id, 'position': ch.position, 'overwrites': ch.overwrites} 
-                                   for ch in guild.channels}
-
-# 3. دالة تجنب حظر البوت (تأخير آمن)
+# --- دالة المهام الآمنة (لمنع حظر البوت) ---
 async def queue_task(target_id, coro):
     try: await coro
     except discord.HTTPException as e:
@@ -180,7 +179,26 @@ async def queue_task(target_id, coro):
         await asyncio.sleep(5)
         processing_events.discard(target_id)
 
-# 4. دوال الحماية (الحذف، الإنشاء، التحديث)
+# --- دالة الحفظ الشاملة (تغطي كل شيء) ---
+async def save_snapshot(guild):
+    # حفظ الرتب بالكامل
+    server_snapshot['roles'] = {r.id: {
+        'name': r.name, 'permissions': r.permissions.value, 'color': r.color.value,
+        'hoist': r.hoist, 'mentionable': r.mentionable, 'position': r.position
+    } for r in guild.roles if not r.managed and r.name != "@everyone"}
+
+    # حفظ القنوات بالكامل (مع الصلاحيات والترتيب والكاتيجوري)
+    server_snapshot['channels'] = {ch.id: {
+        'name': ch.name, 'type': str(ch.type), 'category_id': ch.category_id,
+        'position': ch.position, 'overwrites': {target.id: perm.pair() for target, perm in ch.overwrites.items()}
+    } for ch in guild.channels}
+    
+    # حفظ الويب هوك
+    try:
+        server_snapshot['webhooks'] = {w.id: {'name': w.name, 'channel_id': w.channel.id, 'url': w.url} for w in await guild.webhooks()}
+    except: pass
+
+# --- أحداث الحماية (إعادة البناء الدقيقة) ---
 @bot.event
 async def on_guild_channel_delete(channel):
     if not bot_data['protection'].get('channel_del', True) or channel.id in processing_events: return
@@ -188,8 +206,15 @@ async def on_guild_channel_delete(channel):
     if data:
         processing_events.add(channel.id)
         try:
+            cat = channel.guild.get_channel(data['category_id'])
             new_ch = await (channel.guild.create_voice_channel if data['type'] == 'voice' else channel.guild.create_text_channel)(
-                **{k: v for k,v in data.items() if k != 'type'})
+                name=data['name'], category=cat, position=data['position'])
+            
+            # تطبيق الصلاحيات المخزنة
+            for target_id, (allow, deny) in data['overwrites'].items():
+                target = channel.guild.get_member(target_id) or channel.guild.get_role(target_id)
+                if target: await new_ch.set_permissions(target, overwrite=discord.PermissionOverwrite.from_pair(allow, deny))
+            
             processing_events.add(new_ch.id)
             asyncio.create_task(queue_task(new_ch.id, asyncio.sleep(0)))
         except: processing_events.discard(channel.id)
@@ -201,7 +226,10 @@ async def on_guild_role_delete(role):
     if data:
         processing_events.add(role.id)
         try:
-            new_role = await role.guild.create_role(**data)
+            new_role = await role.guild.create_role(
+                name=data['name'], permissions=discord.Permissions(data['permissions']),
+                color=discord.Color(data['color']), hoist=data['hoist'], 
+                mentionable=data['mentionable'])
             processing_events.add(new_role.id)
             asyncio.create_task(queue_task(new_role.id, asyncio.sleep(0)))
         except: processing_events.discard(role.id)
@@ -217,26 +245,12 @@ async def on_guild_channel_create(channel):
             asyncio.create_task(queue_task(channel.id, channel.delete()))
         break
 
+# --- التحديث الأولي عند التشغيل ---
 @bot.event
-async def on_webhooks_update(channel):
-    if not bot_data['protection'].get('webhook', True): return
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
-        if entry.user.id != bot.user.id:
-            webhooks = await channel.webhooks()
-            for w in webhooks: await w.delete()
-        break
-
-@bot.event
-async def on_guild_channel_update(before, after):
-    if not bot_data['protection'].get('channel_update', True): return
-    if before.name != after.name:
-        data = server_snapshot['channels'].get(after.id)
-        if data and data['name'] != after.name:
-            await after.edit(name=data['name'])
-            await save_snapshot(after.guild)
-
-# --- [انتهى الجزء] ---
-
+async def on_ready():
+    for guild in bot.guilds:
+        await save_snapshot(guild)
+    print(f"✅ تم تحميل نسخة السيرفر والبدء في حماية {len(bot.guilds)} سيرفر.")
 
 
 
