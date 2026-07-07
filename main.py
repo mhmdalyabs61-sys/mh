@@ -152,32 +152,48 @@ async def ban_user(guild, user, reason):
 
 
 
-# --- نظام الحماية الشامل والكامل ---
-# ضع هذا المتغير في بداية ملفك
-processing = set()
+# --- الكود الكامل الشامل ---
 
 @bot.event
 async def on_guild_channel_create(channel):
     if not bot_data['protection'].get('channel_create', True): return
-    if channel.id in processing: return 
-    
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(2) # انتظار لتحديث السجل
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.user.id == bot.user.id: return
+        if entry.user.id == bot.user.id: return # البوت هو المنشئ، تجاهل
         await channel.delete(reason="حماية: إنشاء غير مصرح.")
         break
 
 @bot.event
 async def on_guild_channel_delete(channel):
     if not bot_data['protection'].get('channel_del', True): return
-    if channel.id in processing: return
-    
-    processing.add(channel.id)
-    try:
-        new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites) if not isinstance(channel, discord.VoiceChannel) else await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites)
-        await asyncio.sleep(5)
-    finally:
-        processing.discard(channel.id)
+    await asyncio.sleep(2)
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+        if entry.user.id == bot.user.id: return # البوت هو الحاذف، تجاهل
+        # إذا الحاذف شخص آخر، أعد بناء القناة
+        try:
+            new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites) if not isinstance(channel, discord.VoiceChannel) else await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites)
+        except: pass
+        break
+
+@bot.event
+async def on_guild_role_delete(role):
+    if not bot_data['protection'].get('role_del', True): return
+    await asyncio.sleep(2)
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+        if entry.user.id == bot.user.id: return
+        try:
+            await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color, hoist=role.hoist, mentionable=role.mentionable)
+        except: pass
+        break
+
+@bot.event
+async def on_guild_role_create(role):
+    if not bot_data['protection'].get('role_create', True): return
+    await asyncio.sleep(2)
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+        if entry.user.id == bot.user.id: return
+        await role.delete(reason="حماية: إنشاء غير مصرح.")
+        break
 
 @bot.event
 async def on_guild_channel_update(before, after):
@@ -185,29 +201,6 @@ async def on_guild_channel_update(before, after):
     if before.name != after.name:
         try: await after.edit(name=before.name)
         except: pass
-
-@bot.event
-async def on_guild_role_create(role):
-    if not bot_data['protection'].get('role_create', True): return
-    if role.id in processing: return
-    
-    await asyncio.sleep(0.5)
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-        if entry.user.id == bot.user.id: return
-        await role.delete(reason="حماية: إنشاء غير مصرح.")
-        break
-
-@bot.event
-async def on_guild_role_delete(role):
-    if not bot_data['protection'].get('role_del', True): return
-    if role.id in processing: return
-    
-    processing.add(role.id)
-    try:
-        new_role = await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color, hoist=role.hoist, mentionable=role.mentionable)
-        await asyncio.sleep(5)
-    finally:
-        processing.discard(role.id)
 
 @bot.event
 async def on_guild_role_update(before, after):
@@ -223,6 +216,7 @@ async def on_webhooks_update(channel):
         webhooks = await channel.webhooks()
         for wh in webhooks: await wh.delete()
     except: pass
+
 
 
 
