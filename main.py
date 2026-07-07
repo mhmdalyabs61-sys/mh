@@ -152,7 +152,6 @@ async def ban_user(guild, user, reason):
 
 
 
-
 import asyncio
 import discord
 
@@ -228,6 +227,7 @@ async def on_webhooks_update(channel):
         for wh in webhooks:
             asyncio.create_task(queue_task(wh.id, wh.delete(reason="حماية: حذف ويب هوك")))
     except: pass
+
 
 
 
