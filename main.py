@@ -154,9 +154,10 @@ import discord
 from discord.ext import commands
 import asyncio
 
-# --- الذاكرة ---
+# الذاكرة (مخزن البيانات)
 server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
-processing = set() # القفل الذكي
+# القائمة البيضاء (أمان من الحذف الذاتي)
+whitelist = set()
 
 # --- دالة الحفظ الشامل ---
 async def full_save(guild):
@@ -166,12 +167,7 @@ async def full_save(guild):
         server_snapshot['webhooks'] = {w.id: {'name': w.name, 'channel_id': w.channel.id} for w in await guild.webhooks()}
     except: pass
 
-# --- القفل الذكي (إزالة تلقائية) ---
-async def safe_unlock(item_id):
-    await asyncio.sleep(5)
-    if item_id in processing: processing.remove(item_id)
-
-# --- أحداث الحماية (الحذف والاستعادة) ---
+# --- الحماية (الاستعادة) ---
 @bot.event
 async def on_guild_channel_delete(channel):
     data = server_snapshot['channels'].get(channel.id)
@@ -179,8 +175,9 @@ async def on_guild_channel_delete(channel):
         cat = channel.guild.get_channel(data['category_id'])
         new_ch = await (channel.guild.create_voice_channel if data['type'] == 'voice' else channel.guild.create_text_channel)(
             name=data['name'], category=cat, position=data['position'])
-        processing.add(new_ch.id)
-        asyncio.create_task(safe_unlock(new_ch.id))
+        whitelist.add(new_ch.id)
+        await asyncio.sleep(5)
+        whitelist.discard(new_ch.id)
 
 @bot.event
 async def on_guild_role_delete(role):
@@ -188,51 +185,50 @@ async def on_guild_role_delete(role):
     if data:
         new_role = await role.guild.create_role(name=data['name'], permissions=discord.Permissions(data['permissions']), color=discord.Color(data['color']))
         await new_role.edit(position=data['position'])
-        processing.add(new_role.id)
-        asyncio.create_task(safe_unlock(new_role.id))
+        whitelist.add(new_role.id)
+        await asyncio.sleep(5)
+        whitelist.discard(new_role.id)
 
-# --- أحداث الحماية (الإنشاء والتغيير) ---
+# --- الحماية (حذف الغريب) ---
 @bot.event
 async def on_guild_channel_create(channel):
-    if channel.id in processing: return
-    await channel.delete()
+    if channel.id in whitelist: return
+    await channel.delete(reason="حماية: تم إنشاء قناة غير مصرح بها")
 
 @bot.event
 async def on_guild_role_create(role):
-    if role.id in processing: return
-    await role.delete()
-
-@bot.event
-async def on_guild_channel_update(before, after):
-    # حماية الاسم: إذا تغير الاسم يعيده فوراً
-    if before.name != after.name:
-        await after.edit(name=before.name)
-
-@bot.event
-async def on_guild_role_update(before, after):
-    # حماية الاسم: إذا تغير الاسم يعيده فوراً
-    if before.name != after.name:
-        await after.edit(name=before.name)
+    if role.id in whitelist: return
+    await role.delete(reason="حماية: تم إنشاء رتبة غير مصرح بها")
 
 @bot.event
 async def on_webhooks_update(channel):
-    # حماية الويب هوك: حذف أي ويب هوك جديد مشبوه
-    current_whs = await channel.guild.webhooks()
-    for wh in current_whs:
-        if wh.id not in server_snapshot['webhooks'] and wh.id not in processing:
-            await wh.delete()
+    for w in await channel.guild.webhooks():
+        if w.id not in server_snapshot['webhooks'] and w.id not in whitelist:
+            await w.delete(reason="حماية: ويب هوك غير مصرح به")
+
+# --- التحديث التلقائي للأسماء ---
+@bot.event
+async def on_guild_channel_update(before, after):
+    if before.name != after.name: await after.edit(name=before.name)
+    await full_save(after.guild)
+
+@bot.event
+async def on_guild_role_update(before, after):
+    if before.name != after.name: await after.edit(name=before.name)
+    await full_save(after.guild)
 
 # --- أمر التحديث اليدوي ---
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def test(ctx):
     await full_save(ctx.guild)
-    await ctx.send("✅ تم تحديث النسخة الاحتياطية (شامل القنوات، الرتب، والويب هوك).")
+    await ctx.send("✅ تم تحديث بيانات الحماية (القنوات، الرتب، الويب هوك).")
 
 @bot.event
 async def on_ready():
     for guild in bot.guilds: await full_save(guild)
-    print("✅ نظام الحماية الكامل نشط.")
+    print("✅ نظام الحماية فعال.")
+
 
 
 
