@@ -152,38 +152,20 @@ async def ban_user(guild, user, reason):
 
 
 
-import asyncio
-import discord
+# --- [ابدأ من هنا] ---
 
-
-
-# --- تشغيل النسخ عند فتح البوت ---
-@bot.event
-async def on_ready():
-    for guild in bot.guilds:
-        await save_snapshot(guild)
-    print(f"تم حفظ نسخة من السيرفر: {len(server_snapshot['channels'])} قناة و {len(server_snapshot['roles'])} رتبة")
-
-
-
-import asyncio
-import discord
-
-# --- المخزن الدائم للبيانات ---
+# 1. تعريف الذاكرة المؤقتة لنظام الحماية
 server_snapshot = {'channels': {}, 'roles': {}}
-event_history = {}
+processing_events = set()
 
+# 2. دالة حفظ حالة السيرفر الحالية
 async def save_snapshot(guild):
-    """تحديث قاعدة البيانات الداخلية للسيرفر"""
     server_snapshot['roles'] = {r.id: {'name': r.name, 'permissions': r.permissions, 'color': r.color, 'hoist': r.hoist, 'mentionable': r.mentionable} 
                                 for r in guild.roles if not r.managed and r.name != "@everyone"}
     server_snapshot['channels'] = {ch.id: {'name': ch.name, 'type': str(ch.type), 'category': ch.category_id, 'position': ch.position, 'overwrites': ch.overwrites} 
                                    for ch in guild.channels}
 
-@bot.event
-async def on_ready():
-    for guild in bot.guilds: await save_snapshot(guild)
-
+# 3. دالة تجنب حظر البوت (تأخير آمن)
 async def queue_task(target_id, coro):
     try: await coro
     except discord.HTTPException as e:
@@ -192,62 +174,65 @@ async def queue_task(target_id, coro):
             await coro
     finally:
         await asyncio.sleep(5)
-        event_history.pop(target_id, None)
+        processing_events.discard(target_id)
 
-# --- الحماية المطورة ---
-
+# 4. دوال الحماية (الحذف، الإنشاء، التحديث)
 @bot.event
 async def on_guild_channel_delete(channel):
-    if not bot_data['protection'].get('channel_del', True) or event_history.get(channel.id): return
-    event_history[channel.id] = True
-    
-    # استرجاع البيانات من السناب شوت
+    if not bot_data['protection'].get('channel_del', True) or channel.id in processing_events: return
     data = server_snapshot['channels'].get(channel.id)
-    try:
-        if data: # إذا كانت البيانات موجودة في الأرشيف
-            if data['type'] == 'voice':
-                new_ch = await channel.guild.create_voice_channel(**{k: v for k,v in data.items() if k != 'type'})
-            else:
-                new_ch = await channel.guild.create_text_channel(**{k: v for k,v in data.items() if k != 'type'})
-            event_history[new_ch.id] = True
+    if data:
+        processing_events.add(channel.id)
+        try:
+            new_ch = await (channel.guild.create_voice_channel if data['type'] == 'voice' else channel.guild.create_text_channel)(
+                **{k: v for k,v in data.items() if k != 'type'})
+            processing_events.add(new_ch.id)
             asyncio.create_task(queue_task(new_ch.id, asyncio.sleep(0)))
-    except Exception as e:
-        print(f"Error restoring: {e}")
-        event_history.pop(channel.id, None)
+        except: processing_events.discard(channel.id)
 
 @bot.event
 async def on_guild_role_delete(role):
-    if not bot_data['protection'].get('role_del', True) or event_history.get(role.id): return
-    event_history[role.id] = True
-    
+    if not bot_data['protection'].get('role_del', True) or role.id in processing_events: return
     data = server_snapshot['roles'].get(role.id)
-    try:
-        if data:
+    if data:
+        processing_events.add(role.id)
+        try:
             new_role = await role.guild.create_role(**data)
-            event_history[new_role.id] = True
+            processing_events.add(new_role.id)
             asyncio.create_task(queue_task(new_role.id, asyncio.sleep(0)))
-    except: event_history.pop(role.id, None)
+        except: processing_events.discard(role.id)
 
-# --- أحداث التحديث للنسخة الاحتياطية ---
 @bot.event
 async def on_guild_channel_create(channel):
-    await save_snapshot(channel.guild) # تحديث النسخة
-    if event_history.get(channel.id) or not bot_data['protection'].get('channel_create', True): return
+    await asyncio.sleep(0.5)
+    await save_snapshot(channel.guild)
+    if channel.id in processing_events or not bot_data['protection'].get('channel_create', True): return
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
         if entry.user.id != bot.user.id:
-            event_history[channel.id] = True
+            processing_events.add(channel.id)
             asyncio.create_task(queue_task(channel.id, channel.delete()))
         break
 
 @bot.event
-async def on_guild_role_create(role):
-    await save_snapshot(role.guild) # تحديث النسخة
-    if event_history.get(role.id) or not bot_data['protection'].get('role_create', True): return
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+async def on_webhooks_update(channel):
+    if not bot_data['protection'].get('webhook', True): return
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
         if entry.user.id != bot.user.id:
-            event_history[role.id] = True
-            asyncio.create_task(queue_task(role.id, role.delete()))
+            webhooks = await channel.webhooks()
+            for w in webhooks: await w.delete()
         break
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    if not bot_data['protection'].get('channel_update', True): return
+    if before.name != after.name:
+        data = server_snapshot['channels'].get(after.id)
+        if data and data['name'] != after.name:
+            await after.edit(name=data['name'])
+            await save_snapshot(after.guild)
+
+# --- [انتهى الجزء] ---
+
 
 
 
