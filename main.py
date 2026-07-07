@@ -149,7 +149,7 @@ async def ban_user(guild, user, reason):
         await send_log(guild, f"🔨 **تم تبنيد** {user.mention} | السبب: {reason}")
     except: pass
 
--
+
 @bot.command()
 async def test(ctx):
     # حفظ الحالة الحالية
