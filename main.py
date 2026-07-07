@@ -153,90 +153,54 @@ async def ban_user(guild, user, reason):
 
 # --- نظام الحماية الاحترافي (Audit Logs Based) ---
 
-@bot.event
-async def on_guild_channel_delete(channel):
-    # عند الحذف، البوت يقوم بإعادة إنشاء القناة فوراً
-    try:
-        if isinstance(channel, discord.CategoryChannel):
-            await channel.guild.create_category(name=channel.name, position=channel.position)
-        elif isinstance(channel, discord.VoiceChannel):
-            await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
-        else:
-            await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
-    except: pass
+# --- نظام الحماية الشامل والكامل ---
 
 @bot.event
 async def on_guild_channel_create(channel):
-    # ننتظر ثانية واحدة لضمان توفر بيانات السجل
-    import asyncio
+    if not bot_data['protection'].get('channel_create', True): return
     await asyncio.sleep(1)
-    
-    # التحقق من سجلات التدقيق لمعرفة من أنشأ القناة
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        # إذا كان البوت هو من أنشأ القناة، لا نفعل شيئاً
-        if entry.user.id == bot.user.id:
-            return
-            
-        # إذا كان مستخدم آخر، نقوم بالحذف
-        try:
-            await channel.delete(reason="حماية: تم إنشاء قناة بدون صلاحية.")
-            print(f"تم حذف قناة أنشأها المستخدم: {entry.user.name}")
-        except discord.Forbidden:
-            print("خطأ: البوت لا يملك صلاحية حذف القنوات!")
-        break
-
-
-# --- نظام حماية الرتب (الحارس الصارم) ---
-
-# هذا الكود يمنع التكرار (Loop) عن طريق التحقق من هوية الشخص
-@bot.event
-async def on_guild_role_create(role):
-    # ننتظر قليلاً لضمان تسجيل الحدث في سجلات ديسكورد
-    import asyncio
-    await asyncio.sleep(1)
-    
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-        # إذا كان البوت هو من أنشأ الرتبة، لا نفعل شيئاً (نخرج من الدالة)
-        if entry.user.id == bot.user.id:
-            return
-        
-        # إذا كان شخص آخر، نحذف الرتبة
-        try:
-            await role.delete(reason="حماية: تم إنشاء رتبة بدون صلاحية.")
-            print(f"تم حذف رتبة غير مخولة أنشأها: {entry.user.name}")
-        except discord.Forbidden:
-            print("خطأ: لا أملك صلاحية حذف الرتب.")
+        if entry.user.id == bot.user.id: return
+        try: await channel.delete(reason="حماية: تم إنشاء قناة.")
+        except: pass
         break
 
 @bot.event
-async def on_guild_role_delete(role):
-    # هذا الحدث للحماية من حذف الرتب الموجودة بالفعل
-    # لا تضع فيه كود لإعادة إنشاء الرتبة لأنك ستقع في الحلقة المفرغة التي تشتكي منها
-    print(f"تم حذف رتبة: {role.name}")
-
-
-
-
-# --- نظام حماية الرتب (الحصين) ---
-
-@bot.event
-async def on_guild_role_delete(role):
-    # عند حذف رتبة، البوت يعيد إنشاءها
+async def on_guild_channel_delete(channel):
+    if not bot_data['protection'].get('channel_del', True): return
     try:
-        new_role = await role.guild.create_role(
-            name=role.name, 
-            permissions=role.permissions, 
-            color=role.color,
-            hoist=role.hoist,
-            mentionable=role.mentionable
-        )
-        # هنا البوت يعرف أنها رتبته الخاصة، فلا يحذفها لاحقاً
+        if isinstance(channel, discord.CategoryChannel): await channel.guild.create_category(name=channel.name, position=channel.position)
+        elif isinstance(channel, discord.VoiceChannel): await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
+        else: await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position)
     except: pass
 
+@bot.event
+async def on_guild_channel_update(before, after):
+    if not bot_data['protection'].get('channel_update', True): return
+    if before.name != after.name:
+        try: await after.edit(name=before.name)
+        except: pass
 
+@bot.event
+async def on_guild_role_create(role):
+    if not bot_data['protection'].get('role_create', True): return
+    await asyncio.sleep(1)
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+        if entry.user.id == bot.user.id: return
+        try: await role.delete(reason="حماية: تم إنشاء رتبة.")
+        except: pass
+        break
+
+@bot.event
+async def on_guild_role_delete(role):
+    if not bot_data['protection'].get('role_del', True): return
+    try:
+        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color, hoist=role.hoist, mentionable=role.mentionable)
+    except: pass
 
 @bot.event
 async def on_webhooks_update(channel):
+    if not bot_data['protection'].get('webhook', True): return
     try:
         webhooks = await channel.webhooks()
         for wh in webhooks: await wh.delete()
