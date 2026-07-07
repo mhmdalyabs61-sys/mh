@@ -6,6 +6,22 @@ from datetime import timedelta, datetime
 from typing import Union, Optional, List, Dict
 from flask import Flask
 from threading import Thread
+# --- تعريف البيانات الأساسية (لازم تكون فوق أي دالة) ---
+server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
+whitelist = set()
+
+# تأكد أن bot_data يحتوي على كل المفاتيح المطلوبة
+bot_data = {
+    'whitelisted': [], 
+    'log_channels': {},  # هذا هو اللي مسبب الـ KeyError
+    'protection': {
+        'channel_del': True, 
+        'channel_create': True, 
+        'role_del': True, 
+        'role_create': True, 
+        'webhook': True
+    }
+}
 
 app = Flask('')
 
