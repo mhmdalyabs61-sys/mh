@@ -247,6 +247,7 @@ async def on_webhooks_update(channel):
 
 
 
+
 @bot.event
 async def on_voice_state_update(member, before, after):
     if before.channel and before.channel != after.channel:
