@@ -153,18 +153,9 @@ async def ban_user(guild, user, reason):
 # --- نظام الحماية الشامل والكامل ---
 
 # هذا القفل يمنع البوت من "أكل نفسه"
-ignore_events = set()
 
-@bot.event
-async def on_guild_channel_create(channel):
-    if not bot_data['protection'].get('channel_create', True): return
-    if channel.id in ignore_events: return # إذا البوت أنشأها، تجاهلها
-    
-    await asyncio.sleep(0.5)
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.user.id == bot.user.id: return
-        await channel.delete(reason="حماية: تم إنشاء قناة بدون صلاحية.")
-        break
+
+
 
 @bot.event
 async def on_guild_channel_delete(channel):
@@ -191,15 +182,36 @@ async def on_guild_role_create(role):
         break
 
 @bot.event
-async def on_guild_role_delete(role):
-    if not bot_data['protection'].get('role_del', True): return
+async def on_guild_channel_create(channel):
+    if not bot_data['protection'].get('channel_create', True): return
+    print(f"DEBUG: تم كشف إنشاء قناة {channel.name}")
     
-    ignore_events.add(role.id)
-    try:
-        new_role = await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color)
-        await asyncio.sleep(5)
-        ignore_events.discard(new_role.id)
-    except: pass
+    # انتظر قليلاً لسجل التدقيق ليتحدث
+    await asyncio.sleep(1.0)
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        if entry.user.id == bot.user.id: return
+        print(f"DEBUG: القناة {channel.name} أنشئت بواسطة {entry.user.name}. جاري الحذف...")
+        try:
+            await channel.delete(reason="حماية: إنشاء غير مصرح.")
+        except Exception as e:
+            print(f"DEBUG: فشل الحذف! الخطأ: {e}")
+        break
+
+@bot.event
+async def on_guild_role_create(role):
+    if not bot_data['protection'].get('role_create', True): return
+    print(f"DEBUG: تم كشف إنشاء رتبة {role.name}")
+    
+    await asyncio.sleep(1.0)
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+        if entry.user.id == bot.user.id: return
+        print(f"DEBUG: الرتبة {role.name} أنشئت بواسطة {entry.user.name}. جاري الحذف...")
+        try:
+            await role.delete(reason="حماية: تم إنشاء رتبة.")
+        except Exception as e:
+            print(f"DEBUG: فشل الحذف! الخطأ: {e}")
+        break
+
 
 @bot.event
 async def on_webhooks_update(channel):
