@@ -149,6 +149,10 @@ async def ban_user(guild, user, reason):
         await send_log(guild, f"🔨 **تم تبنيد** {user.mention} | السبب: {reason}")
     except: pass
 
+@bot.command()
+async def test_snapshot(ctx):
+    await save_snapshot(ctx.guild)
+    await ctx.send(f"تم حفظ {len(server_snapshot['channels'])} قناة في الذاكرة.")
 
 
 
