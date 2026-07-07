@@ -165,20 +165,28 @@ async def on_guild_channel_delete(channel):
             await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.topic)
     except: pass
 
+# --- نظام حماية الرتب (الحارس الصارم) ---
+
 @bot.event
-async def on_guild_channel_create(channel):
-    # البوت يتأكد من سجلات السيرفر (Audit Logs) لمعرفة من أنشأ القناة
+async def on_guild_role_create(role):
+    # انتظر ثانية للتأكد أن سجلات ديسكورد (Audit Logs) سجلت العملية
+    await asyncio.sleep(1)
+    
     try:
-        # الانتظار لثانية لضمان ظهور العملية في السجلات
-        await asyncio.sleep(1)
-        async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-            # إذا كان البوت هو من أنشأها، توقف
+        # البحث في سجلات السيرفر عن الشخص الذي أنشأ الرتبة
+        async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+            
+            # 1. إذا كان البوت هو من أنشأها، لا تفعل شيئاً (اخرج)
             if entry.user.id == bot.user.id:
                 return
-            # إذا كان شخص آخر، احذفها
-            if channel.name != "protection-logs":
-                await channel.delete()
-    except: pass
+            
+            # 2. إذا كان أي شخص آخر، احذف الرتبة فوراً
+            await role.delete()
+            print(f"✅ تم حذف رتبة غير مصرح بها أنشأها: {entry.user}")
+            
+    except Exception as e:
+        print(f"❌ حدث خطأ في حماية الرتب: {e}")
+
 
 # --- نظام حماية الرتب (الحصين) ---
 
@@ -196,19 +204,7 @@ async def on_guild_role_delete(role):
         # هنا البوت يعرف أنها رتبته الخاصة، فلا يحذفها لاحقاً
     except: pass
 
-@bot.event
-async def on_guild_role_create(role):
-    # تجاهل الرتب التي ينشئها البوت نفسه (باستخدام ID)
-    # أو نستخدم شرطاً بسيطاً: إذا كان البوت هو المنشئ في السجل
-    try:
-        await asyncio.sleep(1) # ننتظر قليلاً ليحدث سجل التدقيق
-        async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-            if entry.user.id == bot.user.id:
-                return # إذا أنا (البوت) اللي سويتها، لا تحذفها!
-            
-            # إذا شخص ثاني سواها، احذفها
-            await role.delete()
-    except: pass
+
 
 @bot.event
 async def on_webhooks_update(channel):
