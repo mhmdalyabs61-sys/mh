@@ -157,8 +157,16 @@ async def ban_user(guild, user, reason):
 
 # --- نظام الحماية المركزي المعتمد ---
 
+# استخدمنا مجموعة (Set) لتخزين أسماء القنوات التي ينشئها البوت مؤقتاً
+bot_created_channels = set()
+
 @bot.event
 async def on_guild_channel_create(channel):
+    # إذا كانت القناة في قائمة الانتظار، لا تحذفها
+    if channel.name in bot_created_channels:
+        bot_created_channels.remove(channel.name)
+        return
+        
     if not bot_data['protection'].get('channel_create', True): return
     await asyncio.sleep(0.5)
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
@@ -169,10 +177,22 @@ async def on_guild_channel_create(channel):
 @bot.event
 async def on_guild_channel_delete(channel):
     if not bot_data['protection'].get('channel_del', True): return
+    
+    # قبل إعادة الإنشاء، نضيف اسم القناة لقائمة البوت ليتم تجاهلها عند الإنشاء
+    bot_created_channels.add(channel.name)
+    
     try:
-        new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category) if not isinstance(channel, discord.VoiceChannel) else await channel.guild.create_voice_channel(name=channel.name, category=channel.category)
-        await new_ch.edit(position=channel.position)
-    except: pass
+        if isinstance(channel, discord.CategoryChannel): 
+            await channel.guild.create_category(name=channel.name, position=channel.position)
+        elif isinstance(channel, discord.VoiceChannel): 
+            await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
+        else: 
+            await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position)
+    except: 
+        # إذا فشل الإنشاء، نزيل الاسم من القائمة
+        if channel.name in bot_created_channels:
+            bot_created_channels.remove(channel.name)
+
 
 @bot.event
 async def on_guild_channel_update(before, after):
