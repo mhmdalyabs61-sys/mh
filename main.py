@@ -166,39 +166,27 @@ async def ban_user(guild, user, reason):
     except: pass
 
 
-# --- دالة الحفظ الشامل (يجب استخدامها في full_save) ---
-async def full_save(guild):
-    # حفظ الرتب بالصلاحيات واللون والمكان
-    server_snapshot['roles'] = {r.id: {
-        'name': r.name, 'permissions': r.permissions.value, 
-        'color': r.color.value, 'position': r.position, 'hoist': r.hoist
-    } for r in guild.roles if not r.managed and r.name != "@everyone"}
-    
-    # حفظ القنوات بالنوع والكاتيجوري والمكان
-    server_snapshot['channels'] = {c.id: {
-        'name': c.name, 'type': 'voice' if isinstance(c, discord.VoiceChannel) else 'text', 
-        'category_id': c.category_id, 'position': c.position
-    } for c in guild.channels}
-    
-    server_snapshot['webhooks'] = {w.id: {'name': w.name, 'channel_id': w.channel.id} for w in await guild.webhooks()}
+import discord
+from discord.ext import commands
+import asyncio
 
-# --- دوال الاسترجاع الكامل ---
-async def recover_channel(guild, channel_id):
-    data = server_snapshot['channels'].get(channel_id)
-    if not data: return None
-    cat = guild.get_channel(data['category_id'])
-    if data['type'] == 'text':
-        return await guild.create_text_channel(name=data['name'], category=cat, position=data['position'])
-    else:
-        return await guild.create_voice_channel(name=data['name'], category=cat, position=data['position'])
+# --- الدوال المساعدة (تأكد من وجودها في بداية ملفك) ---
+async def ensure_log_channel(guild):
+    # (دالتك الأصلية موجودة مسبقاً، تأكد أنها معرفة)
+    pass
 
-async def recover_role(guild, role_id):
-    data = server_snapshot['roles'].get(role_id)
-    if not data: return None
-    return await guild.create_role(name=data['name'], permissions=discord.Permissions(data['permissions']), 
-                                  color=discord.Color(data['color']), position=data['position'], hoist=data['hoist'])
+async def send_log_embed(guild, title, desc, user, action, status, success=False):
+    channel = await ensure_log_channel(guild)
+    if not channel: return
+    color = discord.Color.green() if success else discord.Color.red()
+    embed = discord.Embed(title=f"🛡️ {title}", description=desc, color=color)
+    embed.add_field(name="👤 الفاعل", value=f"**{user.name}**\n(`{user.id}`)", inline=True)
+    embed.add_field(name="⚙️ الإجراء", value=action, inline=True)
+    embed.add_field(name="✅ الحالة", value=status, inline=True)
+    embed.set_footer(text="نظام الحماية الذكي | Protect System")
+    await channel.send(embed=embed)
 
-# --- نظام الحماية المتكامل مع اللوق والاسترجاع ---
+# --- أحداث الحماية المدمجة ---
 
 @bot.event
 async def on_guild_channel_delete(channel):
@@ -212,6 +200,7 @@ async def on_guild_channel_delete(channel):
             except: pass
             await send_log_embed(channel.guild, "حذف قناة", f"تم حذف: {channel.name}\n{status}", entry.user, "حذف واسترجاع", status, success=(new_ch is not None))
         break
+    await full_save(channel.guild)
 
 @bot.event
 async def on_guild_role_delete(role):
@@ -225,25 +214,29 @@ async def on_guild_role_delete(role):
             except: pass
             await send_log_embed(role.guild, "حذف رتبة", f"تم حذف: {role.name}\n{status}", entry.user, "حذف واسترجاع", status, success=(new_role is not None))
         break
+    await full_save(role.guild)
 
 @bot.event
 async def on_webhooks_update(channel):
     if not bot_data.get('protection', {}).get('webhook', True): return
-    for wh in await channel.guild.webhooks():
+    # جلب الويب هوكات الحالية ومقارنتها بالـ Snapshot
+    current_webhooks = await channel.guild.webhooks()
+    for wh in current_webhooks:
         if wh.id not in server_snapshot.get('webhooks', {}) and wh.user.id != bot.user.id:
-            try: 
+            try:
                 await wh.delete()
-                await send_log_embed(channel.guild, "ويب هوك", "تم حذف ويب هوك غير مصرح به", channel.guild.me, "حذف تلقائي", "تم الحذف بنجاح", success=True)
+                await send_log_embed(channel.guild, "ويب هوك", f"تم حذف ويب هوك غير مصرح به: {wh.name}", channel.guild.me, "حذف تلقائي", "تم الحذف", success=True)
             except: pass
     await full_save(channel.guild)
 
-# --- أوامر التحديث اليدوي ---
+# --- أمر التحديث اليدوي ---
 @bot.command(name="test")
 @commands.has_permissions(administrator=True)
 async def test_protection(ctx):
-    await ctx.send("🔄 جاري تحديث الذاكرة بالكامل...")
+    await ctx.send("🔄 جارٍ تحديث الذاكرة بالكامل...")
     await full_save(ctx.guild)
-    await ctx.send("✅ تم حفظ خصائص السيرفر في السناب شات.")
+    await ctx.send("✅ تم تحديث Snapshot السيرفر (قنوات، رتب، ويب هوكات).")
+
 
 
 
