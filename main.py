@@ -166,73 +166,68 @@ async def ban_user(guild, user, reason):
     except: pass
 
 
-import discord
-from discord.ext import commands
-import asyncio
+# دالة مساعدة للتحقق من القائمة البيضاء
+def is_whitelisted(user_id):
+    return user_id in bot_data.get('whitelisted', [])
 
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
-
-# ذاكرة الحالة (Snapshot)
-snapshot = {'channels': {}, 'roles': {}}
-
-async def save_snapshot(guild):
-    snapshot['channels'] = {c.id: {'name': c.name, 'cat': c.category_id, 'pos': c.position} for c in guild.channels}
-    snapshot['roles'] = {r.id: {'name': r.name, 'pos': r.position, 'perms': r.permissions.value} for r in guild.roles if not r.managed and r.name != "@everyone"}
-
-# --- الحماية من التعديل والحذف ---
+# --- الحماية المحدثة مع القائمة البيضاء ---
 
 @bot.event
 async def on_guild_channel_delete(channel):
+    if not bot_data['protection'].get('channel_del', True) or event_history.get(channel.id): return
+    
+    # فحص القائمة البيضاء
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.user.id == bot.user.id: return
-        data = snapshot['channels'].get(channel.id)
-        # استرجاع المكان والكاتيجوري
-        cat = channel.guild.get_channel(data['cat']) if data else None
-        new_ch = await channel.guild.create_text_channel(name=data['name'] if data else channel.name, category=cat)
-        await new_ch.edit(position=data['pos'] if data else 0)
-        try: await channel.guild.ban(entry.user, reason="تخريب: حذف قناة")
-        except: pass
+        if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
+        
+        event_history[channel.id] = True
+        await instant_ban(channel.guild, entry.user, "تخريب: حذف قنوات")
+        
+        try:
+            new_ch = await channel.guild.create_text_channel(
+                name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites
+            )
+            asyncio.create_task(queue_task(new_ch.id, asyncio.sleep(0)))
+        except: event_history.pop(channel.id, None)
         break
 
 @bot.event
-async def on_guild_role_update(before, after):
-    async for entry in before.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_update):
-        if entry.user.id == bot.user.id: return
-        # منع تغيير الاسم أو الصلاحيات
-        await after.edit(name=before.name, permissions=before.permissions)
-        try: await before.guild.ban(entry.user, reason="تخريب: تعديل رتبة")
-        except: pass
-        break
-
-@bot.event
-async def on_guild_channel_create(channel):
-    # حماية من سبام القنوات
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.user.id == bot.user.id: return
-        await channel.delete()
-        try: await channel.guild.ban(entry.user, reason="تخريب: إنشاء قنوات")
-        except: pass
+async def on_guild_role_delete(role):
+    if not bot_data['protection'].get('role_del', True) or event_history.get(role.id): return
+    
+    # فحص القائمة البيضاء
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+        if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
+        
+        event_history[role.id] = True
+        await instant_ban(role.guild, entry.user, "تخريب: حذف رتب")
+        
+        try:
+            new_role = await role.guild.create_role(
+                name=role.name, permissions=role.permissions, color=role.color, 
+                hoist=role.hoist, mentionable=role.mentionable
+            )
+            await new_role.edit(position=role.position)
+            asyncio.create_task(queue_task(new_role.id, asyncio.sleep(0)))
+        except: event_history.pop(role.id, None)
         break
 
 @bot.event
 async def on_webhooks_update(channel):
-    webhooks = await channel.webhooks()
-    for wh in webhooks:
-        if wh.user.id != bot.user.id:
-            await wh.delete()
-
-@bot.event
-async def on_ready():
-    for g in bot.guilds: await save_snapshot(g)
-    print(f"✅ الحماية الشاملة مفعلة: {bot.user}")
-
-@bot.command()
-async def save(ctx):
-    await save_snapshot(ctx.guild)
-    await ctx.send("✅ تم أخذ لقطة (Snapshot) للحماية.")
-
-
+    if not bot_data['protection'].get('webhook', True): return
+    
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
+        # فحص القائمة البيضاء
+        if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
+        
+        try:
+            webhooks = await channel.webhooks()
+            for wh in webhooks:
+                if wh.user.id != bot.user.id:
+                    await wh.delete(reason="حماية: ويب هوك غير مصرح")
+            await instant_ban(channel.guild, entry.user, "تخريب: إنشاء ويب هوك")
+        except: pass
+        break
 
 
 
