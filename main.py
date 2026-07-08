@@ -38,6 +38,25 @@ def keep_alive():
 
 keep_alive()
 
+# --- تعريفات الحماية الأساسية (مهمة جداً) ---
+event_history = {}
+
+async def queue_task(target_id, coro):
+    try:
+        await coro
+    except discord.HTTPException as e:
+        if e.status == 429:
+            await asyncio.sleep(e.retry_after)
+            await coro
+    finally:
+        await asyncio.sleep(5)
+        event_history.pop(target_id, None)
+
+async def instant_ban(guild, user, reason):
+    if user.id == guild.owner_id or user.id == bot.user.id or is_whitelisted(user.id): return
+    try:
+        await guild.ban(user, reason=reason)
+    except: pass
 
 # ══════════════════════════════════════════════════════════════
 #                   ضع التوكن هنا ↓
