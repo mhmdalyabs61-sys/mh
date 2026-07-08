@@ -173,83 +173,64 @@ import asyncio
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- دالة اللوق ---
-async def send_log(guild, title, description, color=discord.Color.red()):
-    log_channel = discord.utils.get(guild.text_channels, name="protection-logs")
-    if log_channel:
-        embed = discord.Embed(title=f"🛡️ {title}", description=description, color=color)
-        await log_channel.send(embed=embed)
+# ذاكرة الحالة (Snapshot)
+snapshot = {'channels': {}, 'roles': {}}
 
-# --- 1. حماية حذف الرتب ---
-@bot.event
-async def on_guild_role_delete(role):
-    await asyncio.sleep(1)
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-        if entry.user.id == bot.user.id: return
-        new_role = await role.guild.create_role(name=role.name, color=role.color, permissions=role.permissions, position=role.position)
-        try:
-            await role.guild.ban(entry.user, reason="تخريب: حذف رتب")
-            await send_log(role.guild, "حماية الرتب", f"تم استرجاع: {new_role.name}\nتبنيد: {entry.user}", discord.Color.green())
-        except: pass
-        break
+async def save_snapshot(guild):
+    snapshot['channels'] = {c.id: {'name': c.name, 'cat': c.category_id, 'pos': c.position} for c in guild.channels}
+    snapshot['roles'] = {r.id: {'name': r.name, 'pos': r.position, 'perms': r.permissions.value} for r in guild.roles if not r.managed and r.name != "@everyone"}
 
-# --- 2. حماية حذف القنوات ---
+# --- الحماية من التعديل والحذف ---
+
 @bot.event
 async def on_guild_channel_delete(channel):
-    await asyncio.sleep(1)
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
         if entry.user.id == bot.user.id: return
-        if isinstance(channel, discord.VoiceChannel):
-            new_ch = await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
-        else:
-            new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position)
-        try:
-            await channel.guild.ban(entry.user, reason="تخريب: حذف قنوات")
-            await send_log(channel.guild, "حماية القنوات", f"تم استرجاع: {new_ch.name}\nتبنيد: {entry.user}", discord.Color.green())
+        data = snapshot['channels'].get(channel.id)
+        # استرجاع المكان والكاتيجوري
+        cat = channel.guild.get_channel(data['cat']) if data else None
+        new_ch = await channel.guild.create_text_channel(name=data['name'] if data else channel.name, category=cat)
+        await new_ch.edit(position=data['pos'] if data else 0)
+        try: await channel.guild.ban(entry.user, reason="تخريب: حذف قناة")
         except: pass
         break
 
-# --- 3. حماية الويب هوك (Webhook) ---
 @bot.event
-async def on_webhooks_update(channel):
-    # ننتظر ثواني عشان نلحق نعرف مين الفاعل
-    await asyncio.sleep(1)
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
+async def on_guild_role_update(before, after):
+    async for entry in before.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_update):
         if entry.user.id == bot.user.id: return
-        
-        # حذف الويب هوك الجديد
-        try:
-            webhooks = await channel.guild.webhooks()
-            for wh in webhooks:
-                if wh.channel.id == channel.id and wh.user.id != bot.user.id:
-                    await wh.delete()
-                    await channel.guild.ban(entry.user, reason="تخريب: إنشاء ويب هوك")
-                    await send_log(channel.guild, "حماية الويب هوك", f"تم حذف ويب هوك جديد بواسطة: {entry.user}\nوتم تبنيده.", discord.Color.red())
+        # منع تغيير الاسم أو الصلاحيات
+        await after.edit(name=before.name, permissions=before.permissions)
+        try: await before.guild.ban(entry.user, reason="تخريب: تعديل رتبة")
         except: pass
         break
+
+@bot.event
+async def on_guild_channel_create(channel):
+    # حماية من سبام القنوات
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        if entry.user.id == bot.user.id: return
+        await channel.delete()
+        try: await channel.guild.ban(entry.user, reason="تخريب: إنشاء قنوات")
+        except: pass
+        break
+
+@bot.event
+async def on_webhooks_update(channel):
+    webhooks = await channel.webhooks()
+    for wh in webhooks:
+        if wh.user.id != bot.user.id:
+            await wh.delete()
 
 @bot.event
 async def on_ready():
-    print(f"✅ البوت جاهز والحماية تعمل: {bot.user}")
+    for g in bot.guilds: await save_snapshot(g)
+    print(f"✅ الحماية الشاملة مفعلة: {bot.user}")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+@bot.command()
+async def save(ctx):
+    await save_snapshot(ctx.guild)
+    await ctx.send("✅ تم أخذ لقطة (Snapshot) للحماية.")
 
 
 
