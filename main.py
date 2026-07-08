@@ -170,72 +170,70 @@ import discord
 from discord.ext import commands
 import asyncio
 
-# --- الدوال المساعدة (تأكد من وجودها في بداية ملفك) ---
-async def ensure_log_channel(guild):
-    # (دالتك الأصلية موجودة مسبقاً، تأكد أنها معرفة)
-    pass
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-async def send_log_embed(guild, title, desc, user, action, status, success=False):
-    channel = await ensure_log_channel(guild)
-    if not channel: return
-    color = discord.Color.green() if success else discord.Color.red()
-    embed = discord.Embed(title=f"🛡️ {title}", description=desc, color=color)
-    embed.add_field(name="👤 الفاعل", value=f"**{user.name}**\n(`{user.id}`)", inline=True)
-    embed.add_field(name="⚙️ الإجراء", value=action, inline=True)
-    embed.add_field(name="✅ الحالة", value=status, inline=True)
-    embed.set_footer(text="نظام الحماية الذكي | Protect System")
-    await channel.send(embed=embed)
+# --- دالة اللوق ---
+async def send_log(guild, title, description, color=discord.Color.red()):
+    log_channel = discord.utils.get(guild.text_channels, name="protection-logs")
+    if log_channel:
+        embed = discord.Embed(title=f"🛡️ {title}", description=description, color=color)
+        await log_channel.send(embed=embed)
 
-# --- أحداث الحماية المدمجة ---
-
-@bot.event
-async def on_guild_channel_delete(channel):
-    if not bot_data.get('protection', {}).get('channel_del', True): return
-    await asyncio.sleep(0.5)
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.user.id != bot.user.id and entry.user.id != channel.guild.owner_id and entry.user.id not in bot_data.get('whitelisted', []):
-            new_ch = await recover_channel(channel.guild, channel.id)
-            status = f"تم استرجاع: {new_ch.mention}" if new_ch else "فشل الاسترجاع"
-            try: await channel.guild.ban(entry.user, reason="تخريب: حذف قناة")
-            except: pass
-            await send_log_embed(channel.guild, "حذف قناة", f"تم حذف: {channel.name}\n{status}", entry.user, "حذف واسترجاع", status, success=(new_ch is not None))
-        break
-    await full_save(channel.guild)
-
+# --- 1. حماية حذف الرتب ---
 @bot.event
 async def on_guild_role_delete(role):
-    if not bot_data.get('protection', {}).get('role_del', True): return
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1)
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-        if entry.user.id != bot.user.id and entry.user.id != role.guild.owner_id and entry.user.id not in bot_data.get('whitelisted', []):
-            new_role = await recover_role(role.guild, role.id)
-            status = f"تم استرجاع رتبة: {new_role.name}" if new_role else "فشل الاسترجاع"
-            try: await role.guild.ban(entry.user, reason="تخريب: حذف رتبة")
-            except: pass
-            await send_log_embed(role.guild, "حذف رتبة", f"تم حذف: {role.name}\n{status}", entry.user, "حذف واسترجاع", status, success=(new_role is not None))
+        if entry.user.id == bot.user.id: return
+        new_role = await role.guild.create_role(name=role.name, color=role.color, permissions=role.permissions, position=role.position)
+        try:
+            await role.guild.ban(entry.user, reason="تخريب: حذف رتب")
+            await send_log(role.guild, "حماية الرتب", f"تم استرجاع: {new_role.name}\nتبنيد: {entry.user}", discord.Color.green())
+        except: pass
         break
-    await full_save(role.guild)
 
+# --- 2. حماية حذف القنوات ---
+@bot.event
+async def on_guild_channel_delete(channel):
+    await asyncio.sleep(1)
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+        if entry.user.id == bot.user.id: return
+        if isinstance(channel, discord.VoiceChannel):
+            new_ch = await channel.guild.create_voice_channel(name=channel.name, category=channel.category, position=channel.position)
+        else:
+            new_ch = await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position)
+        try:
+            await channel.guild.ban(entry.user, reason="تخريب: حذف قنوات")
+            await send_log(channel.guild, "حماية القنوات", f"تم استرجاع: {new_ch.name}\nتبنيد: {entry.user}", discord.Color.green())
+        except: pass
+        break
+
+# --- 3. حماية الويب هوك (Webhook) ---
 @bot.event
 async def on_webhooks_update(channel):
-    if not bot_data.get('protection', {}).get('webhook', True): return
-    # جلب الويب هوكات الحالية ومقارنتها بالـ Snapshot
-    current_webhooks = await channel.guild.webhooks()
-    for wh in current_webhooks:
-        if wh.id not in server_snapshot.get('webhooks', {}) and wh.user.id != bot.user.id:
-            try:
-                await wh.delete()
-                await send_log_embed(channel.guild, "ويب هوك", f"تم حذف ويب هوك غير مصرح به: {wh.name}", channel.guild.me, "حذف تلقائي", "تم الحذف", success=True)
-            except: pass
-    await full_save(channel.guild)
+    # ننتظر ثواني عشان نلحق نعرف مين الفاعل
+    await asyncio.sleep(1)
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
+        if entry.user.id == bot.user.id: return
+        
+        # حذف الويب هوك الجديد
+        try:
+            webhooks = await channel.guild.webhooks()
+            for wh in webhooks:
+                if wh.channel.id == channel.id and wh.user.id != bot.user.id:
+                    await wh.delete()
+                    await channel.guild.ban(entry.user, reason="تخريب: إنشاء ويب هوك")
+                    await send_log(channel.guild, "حماية الويب هوك", f"تم حذف ويب هوك جديد بواسطة: {entry.user}\nوتم تبنيده.", discord.Color.red())
+        except: pass
+        break
 
-# --- أمر التحديث اليدوي ---
-@bot.command(name="test")
-@commands.has_permissions(administrator=True)
-async def test_protection(ctx):
-    await ctx.send("🔄 جارٍ تحديث الذاكرة بالكامل...")
-    await full_save(ctx.guild)
-    await ctx.send("✅ تم تحديث Snapshot السيرفر (قنوات، رتب، ويب هوكات).")
+@bot.event
+async def on_ready():
+    print(f"✅ البوت جاهز والحماية تعمل: {bot.user}")
+
+
+
 
 
 
