@@ -209,10 +209,45 @@ async def handle_protection(guild, user, action_name, target, action_type):
 # 1. القنوات (حذف، إنشاء، تغيير اسم)
 @bot.event
 async def on_guild_channel_delete(channel):
+    await asyncio.sleep(1) # تأخير لجلب سجل التدقيق
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await handle_protection(channel.guild, entry.user, "حذف قناة", channel.name, "تبنيد")
+        if entry.user.id in [channel.guild.owner_id, bot.user.id] or entry.user.id in bot_data.get('whitelisted', []): return
+        
+        # 1. إرسال اللوق أولاً
+        await handle_protection(channel.guild, entry.user, "حذف قناة", channel.name, "تبنيد + استرجاع")
+        
+        # 2. استرجاع القناة بناءً على نوعها
+        try:
+            if isinstance(channel, discord.VoiceChannel):
+                # استرجاع القناة الصوتية
+                new_channel = await channel.guild.create_voice_channel(
+                    name=channel.name,
+                    category=channel.category,
+                    position=channel.position,
+                    overwrites=channel.overwrites,
+                    bitrate=channel.bitrate,
+                    user_limit=channel.user_limit
+                )
+            else:
+                # استرجاع القناة الكتابية
+                new_channel = await channel.guild.create_text_channel(
+                    name=channel.name,
+                    category=channel.category,
+                    position=channel.position,
+                    overwrites=channel.overwrites,
+                    topic=channel.topic,
+                    nsfw=channel.nsfw,
+                    slowmode_delay=channel.slowmode_delay
+                )
+            
+            # إرسال رسالة في القناة المسترجعة لتأكيد أنها عادت
+            await new_channel.send(f"⚠️ تم استرجاع القناة بعد عملية حذف تخريبية بواسطة {entry.user.mention}")
+            
+        except Exception as e:
+            print(f"Error restoring channel: {e}")
+        
         break
+
 
 @bot.event
 async def on_guild_channel_create(channel):
