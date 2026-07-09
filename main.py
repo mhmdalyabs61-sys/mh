@@ -245,7 +245,7 @@ async def on_guild_role_delete(role):
 @bot.event
 async def on_guild_channel_create(channel):
     if not bot_data['protection'].get('channel_create', True): return
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.1)
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
         if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
         await channel.delete()
@@ -255,7 +255,7 @@ async def on_guild_channel_create(channel):
 @bot.event
 async def on_guild_role_create(role):
     if not bot_data['protection'].get('role_create', True): return
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.1)
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
         if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
         await role.delete()
