@@ -185,89 +185,64 @@ async def ban_user(guild, user, reason):
     except: pass
 
 
-import discord
-from discord.ext import commands
+# --- دالة اللوق المدمجة مع أحداث الحماية ---
 
-# --- الدالة المزخرفة ---
 async def send_log_embed(guild, title, desc, user, action, status, success=False):
     channel = await ensure_log_channel(guild)
     if not channel: return
-    
     color = discord.Color.green() if success else discord.Color.red()
     status_emoji = "✅" if success else "🚫"
-    
-    embed = discord.Embed(
-        title=f"╭─── • 🛡️ {title} 🛡️ • ───╮", 
-        description=f"**{desc}**", 
-        color=color, 
-        timestamp=discord.utils.utcnow()
-    )
+    embed = discord.Embed(title=f"╭─── • 🛡️ {title} 🛡️ • ───╮", description=f"**{desc}**", color=color, timestamp=discord.utils.utcnow())
     embed.add_field(name="👤 ┋ الفاعل", value=f"**{user.mention}**\n`{user.id}`", inline=True)
     embed.add_field(name="⚙️ ┋ الإجراء", value=f"**{action}**", inline=True)
     embed.add_field(name="✅ ┋ الحالة", value=f"**{status_emoji} {status}**", inline=True)
     embed.set_thumbnail(url=user.display_avatar.url)
-    embed.set_footer(text="نظام الحماية الذكي | Protect System", icon_url=guild.icon.url if guild.icon else None)
+    embed.set_footer(text="نظام الحماية الذكي | Protect System")
     await channel.send(embed=embed)
 
-# --- حماية القنوات (تسترجع الصلاحيات + المكان + الكاتقوري) ---
 @bot.event
 async def on_guild_channel_delete(channel):
+    if not bot_data['protection'].get('channel_del', True): return
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
         if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
-        
         await channel.guild.ban(entry.user, reason="تخريب: حذف قنوات")
-        
-        # استرجاع القناة بنفس الخصائص
-        new_channel = await channel.guild.create_text_channel(
-            name=channel.name, category=channel.category, 
-            position=channel.position, overwrites=channel.overwrites
-        )
-        
-        await send_log_embed(channel.guild, "حماية القنوات", f"تم حذف القناة: **{channel.name}**", entry.user, "حذف + استرجاع", "تم التصدي بنجاح", success=False)
+        await channel.guild.create_text_channel(name=channel.name, category=channel.category, position=channel.position, overwrites=channel.overwrites)
+        await send_log_embed(channel.guild, "حماية القنوات", f"تم حذف القناة: **{channel.name}**", entry.user, "حذف + استرجاع", "تم التصدي", success=False)
         break
 
-# --- حماية الرتب (تسترجع الصلاحيات + الألوان + الترتيب) ---
 @bot.event
 async def on_guild_role_delete(role):
+    if not bot_data['protection'].get('role_del', True): return
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
         if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
-        
         await role.guild.ban(entry.user, reason="تخريب: حذف رتب")
-        
-        # استرجاع الرتبة بنفس الخصائص
-        await role.guild.create_role(
-            name=role.name, permissions=role.permissions, color=role.color, 
-            hoist=role.hoist, mentionable=role.mentionable
-        )
-        
-        await send_log_embed(role.guild, "حماية الرتب", f"تم حذف الرتبة: **{role.name}**", entry.user, "حذف + استرجاع", "تم التصدي بنجاح", success=False)
+        await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color, hoist=role.hoist, mentionable=role.mentionable)
+        await send_log_embed(role.guild, "حماية الرتب", f"تم حذف الرتبة: **{role.name}**", entry.user, "حذف + استرجاع", "تم التصدي", success=False)
         break
 
-# --- حماية الويب هوك ---
 @bot.event
 async def on_webhooks_update(channel):
+    if not bot_data['protection'].get('webhook', True): return
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
         if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
-        
-        await channel.guild.ban(entry.user, reason="تخريب: إنشاء ويب هوك")
+        await channel.guild.ban(entry.user, reason="تخريب: ويب هوك")
         webhooks = await channel.webhooks()
         for wh in webhooks: await wh.delete()
-        
-        await send_log_embed(channel.guild, "حماية الويب هوك", "تم كشف إنشاء ويب هوك مشبوه", entry.user, "حذف + تبنيد", "تم التصدي بنجاح", success=False)
+        await send_log_embed(channel.guild, "حماية الويب هوك", "تم كشف إنشاء ويب هوك", entry.user, "حذف + تبنيد", "تم التصدي", success=False)
         break
 
-# --- حماية تغيير الأسماء ---
 @bot.event
 async def on_guild_channel_update(before, after):
-    if before.name != after.name:
-        async for entry in before.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
-            if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
-            
-            await after.edit(name=before.name)
-            await before.guild.ban(entry.user, reason="تخريب: تغيير أسماء القنوات")
-            
-            await send_log_embed(before.guild, "حماية الأسماء", f"تم تغيير اسم القناة من {before.name} إلى {after.name}", entry.user, "تغيير اسم + تبنيد", "تم الإرجاع بنجاح", success=False)
-            break
+    if not bot_data['protection'].get('channel_update', True) or before.name == after.name or after.id in processing_events: return
+    async for entry in before.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
+        if entry.user.id == bot.user.id or is_whitelisted(entry.user.id): return
+        processing_events.add(after.id)
+        await after.edit(name=before.name)
+        await before.guild.ban(entry.user, reason="تخريب: تغيير أسماء")
+        await send_log_embed(before.guild, "حماية الأسماء", f"تم تغيير اسم القناة من {before.name} إلى {after.name}", entry.user, "إرجاع الاسم + تبنيد", "تم التصدي", success=False)
+        processing_events.remove(after.id)
+        break
+
 
 
 
