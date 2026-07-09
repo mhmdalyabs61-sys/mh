@@ -186,6 +186,8 @@ async def ban_user(guild, user, reason):
 
 
 # --- دالة اللوق المدمجة مع أحداث الحماية ---
+def is_whitelisted(user_id):
+    return user_id in bot_data.get('whitelisted', [])
 
 async def send_log_embed(guild, title, desc, user, action, status, success=False):
     channel = await ensure_log_channel(guild)
