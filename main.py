@@ -224,13 +224,26 @@ async def on_guild_channel_delete(channel):
         except: pass
         break
 
+# --- إضافة نظام الحذف الشامل للضغط العالي ---
 @bot.event
 async def on_guild_channel_create(channel):
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        # التحقق من الوايت لست
         if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await handle_protection(channel.guild, entry.user, "إنشاء قناة", channel.name, "تبنيد المخرب + حذف القناة")
-        await channel.delete()
+        
+        # 1. إرسال لوق واحد للعملية الجماعية
+        await handle_protection(channel.guild, entry.user, "إنشاء قنوات جماعية", "جميع الرومات الجديدة", "حذف جماعي فوري + تبنيد")
+        
+        # 2. نظام المسح الشامل (يبحث في السيرفر كله ويحذف أي قناة مشبوهة)
+        # ملاحظة: البوت سيحذف الرومات التي أنشأت في آخر 5 ثواني
+        for chan in channel.guild.channels:
+            if (discord.utils.utcnow() - chan.created_at).total_seconds() < 5:
+                try:
+                    await chan.delete()
+                except:
+                    continue # إذا فشل الحذف بسبب الـ Rate Limit يتجاوزها
         break
+
 
 @bot.event
 async def on_guild_channel_update(before, after):
