@@ -227,22 +227,33 @@ async def on_guild_channel_delete(channel):
 # --- إضافة نظام الحذف الشامل للضغط العالي ---
 @bot.event
 async def on_guild_channel_create(channel):
+    # نتحقق من السجلات لمعرفة الفاعل
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        # التحقق من الوايت لست
+        # تجاهل الوايت لست
         if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
         
-        # 1. إرسال لوق واحد للعملية الجماعية
-        await handle_protection(channel.guild, entry.user, "إنشاء قنوات جماعية", "جميع الرومات الجديدة", "حذف جماعي فوري + تبنيد")
+        # إرسال اللوق فوراً
+        await handle_protection(channel.guild, entry.user, "إنشاء رومات جماعية", "سيرفر كامل", "حذف جماعي فوري + تبنيد")
         
-        # 2. نظام المسح الشامل (يبحث في السيرفر كله ويحذف أي قناة مشبوهة)
-        # ملاحظة: البوت سيحذف الرومات التي أنشأت في آخر 5 ثواني
-        for chan in channel.guild.channels:
-            if (discord.utils.utcnow() - chan.created_at).total_seconds() < 5:
-                try:
-                    await chan.delete()
-                except:
-                    continue # إذا فشل الحذف بسبب الـ Rate Limit يتجاوزها
+        # --- نظام المسح الجماعي المتوازي (هذا هو الحل الجبار) ---
+        # بدلاً من الانتظار، نجمع كل القنوات في قائمة واحدة
+        tasks = []
+        for ch in channel.guild.channels:
+            # نحذف كل قناة تم إنشاؤها في آخر 15 ثانية (زمن أمان أكبر)
+            if (discord.utils.utcnow() - ch.created_at).total_seconds() < 15:
+                tasks.append(ch.delete())
+        
+        # تنفيذ أوامر الحذف كلها دفعة واحدة في نفس الملي ثانية
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+        # تبنيد المخرب
+        try:
+            await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Spam")
+        except:
+            pass
         break
+
 
 
 @bot.event
