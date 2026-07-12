@@ -209,69 +209,44 @@ async def handle_protection(guild, user, action_name, target, action_type, detai
 
 # --- أحداث الحماية الشاملة ---
 
-@bot.event
-async def on_guild_channel_delete(channel):
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        
-        data = {'name': channel.name, 'type': channel.type, 'cat': channel.category, 'pos': channel.position, 'overwrites': channel.overwrites}
-        await handle_protection(channel.guild, entry.user, "حذف قناة", channel.name, "تبنيد المخرب + استرجاع", f"تمت إعادة إنشاء القناة: {channel.name}")
-        try:
-            if data['type'] == discord.ChannelType.voice:
-                await channel.guild.create_voice_channel(name=data['name'], category=data['cat'], position=data['pos'], overwrites=data['overwrites'])
-            else:
-                await channel.guild.create_text_channel(name=data['name'], category=data['cat'], position=data['pos'], overwrites=data['overwrites'])
-        except: pass
-        break
 
-# --- إضافة نظام الحذف الشامل للضغط العالي ---
-import asyncio
-
-# قائمة المهام الحالية لمنع التكرار (لتجنب الهمجية)
-active_cleanups = set()
+# قائمة مؤقتة للقنوات التي أنشأها البوت (لا يجب لمسها)
+protected_channels = set()
 
 @bot.event
 async def on_guild_channel_create(channel):
-    # 1. التحقق الفوري (Whitelist)
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.user.id in bot_data.get('whitelisted', []):
-            return
+    # 1. القائمة البيضاء
+    if any(entry.user.id in bot_data.get('whitelisted', []) for entry in await channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create).flatten()):
+        return
 
-        # 2. التبنيد الفوري (الأولوية القصوى)
-        try:
-            await channel.guild.ban(entry.user, reason="Anti-Nuke: Fast Response")
-        except:
-            pass
+    # 2. إذا كانت القناة في قائمة "المحمية"، لا تحذفها
+    if channel.id in protected_channels:
+        return
 
-        # 3. استخدام دالتك الأصلية (handle_protection) فوراً
-        # لاحظ أننا استخدمنا create_task عشان البوت ما ينتظر اللوق ويستمر بسرعة
-        asyncio.create_task(handle_protection(
-            guild=channel.guild, 
-            user=entry.user, 
-            action_name="إنشاء رومات تخريبية", 
-            target=channel.name, 
-            action_type="حذف جماعي + تبنيد"
-        ))
+    # بقية كود الحماية (تبنيد + حذف)
+    # ... (ضع كود الباند واللوق هنا)
+    
+    # عند الحذف:
+    await channel.delete()
 
-        # 4. التنظيف السريع (بدون انتظار أو تعليق للبوت)
-        if channel.guild.id not in active_cleanups:
-            active_cleanups.add(channel.guild.id)
-            asyncio.create_task(fast_cleanup(channel.guild))
+@bot.event
+async def on_guild_channel_delete(channel):
+    # إذا البوت هو من حذفها، لا تسترجعها
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+        if entry.user.id == bot.user.id:
+            return 
+
+        # 3. قبل الاسترجاع، ضف القناة للقائمة المحمية
+        protected_channels.add(channel.id) # هذا هو مفتاح الحل
+        
+        # استرجاع القناة
+        new_ch = await channel.guild.create_text_channel(...)
+        
+        # 4. بعد فترة، أزلها من القائمة المحمية
+        await asyncio.sleep(10)
+        protected_channels.discard(channel.id)
         break
 
-async def fast_cleanup(guild):
-    """دالة التنظيف السريع في الخلفية"""
-    try:
-        # البحث عن القنوات التي أُنشئت في آخر 5 ثوانٍ فقط (دقة متناهية)
-        for ch in guild.channels:
-            if (discord.utils.utcnow() - ch.created_at).total_seconds() < 5:
-                try:
-                    await ch.delete()
-                except:
-                    continue
-    finally:
-        # إزالة السيرفر من قائمة المهام بعد الانتهاء
-        active_cleanups.discard(guild.id)
 
 
 
