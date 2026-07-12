@@ -225,34 +225,54 @@ async def on_guild_channel_delete(channel):
         break
 
 # --- إضافة نظام الحذف الشامل للضغط العالي ---
+import asyncio
+
+# قائمة المهام الحالية لمنع التكرار (لتجنب الهمجية)
+active_cleanups = set()
+
 @bot.event
 async def on_guild_channel_create(channel):
-    # نتحقق من السجلات لمعرفة الفاعل
+    # 1. التحقق الفوري (Whitelist)
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        # تجاهل الوايت لست
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        
-        # إرسال اللوق فوراً
-        await handle_protection(channel.guild, entry.user, "إنشاء رومات جماعية", "سيرفر كامل", "حذف جماعي فوري + تبنيد")
-        
-        # --- نظام المسح الجماعي المتوازي (هذا هو الحل الجبار) ---
-        # بدلاً من الانتظار، نجمع كل القنوات في قائمة واحدة
-        tasks = []
-        for ch in channel.guild.channels:
-            # نحذف كل قناة تم إنشاؤها في آخر 15 ثانية (زمن أمان أكبر)
-            if (discord.utils.utcnow() - ch.created_at).total_seconds() < 15:
-                tasks.append(ch.delete())
-        
-        # تنفيذ أوامر الحذف كلها دفعة واحدة في نفس الملي ثانية
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-            
-        # تبنيد المخرب
+        if entry.user.id in bot_data.get('whitelisted', []):
+            return
+
+        # 2. التبنيد الفوري (الأولوية القصوى)
         try:
-            await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Spam")
+            await channel.guild.ban(entry.user, reason="Anti-Nuke: Fast Response")
         except:
             pass
+
+        # 3. استخدام دالتك الأصلية (handle_protection) فوراً
+        # لاحظ أننا استخدمنا create_task عشان البوت ما ينتظر اللوق ويستمر بسرعة
+        asyncio.create_task(handle_protection(
+            guild=channel.guild, 
+            user=entry.user, 
+            action_name="إنشاء رومات تخريبية", 
+            target=channel.name, 
+            action_type="حذف جماعي + تبنيد"
+        ))
+
+        # 4. التنظيف السريع (بدون انتظار أو تعليق للبوت)
+        if channel.guild.id not in active_cleanups:
+            active_cleanups.add(channel.guild.id)
+            asyncio.create_task(fast_cleanup(channel.guild))
         break
+
+async def fast_cleanup(guild):
+    """دالة التنظيف السريع في الخلفية"""
+    try:
+        # البحث عن القنوات التي أُنشئت في آخر 5 ثوانٍ فقط (دقة متناهية)
+        for ch in guild.channels:
+            if (discord.utils.utcnow() - ch.created_at).total_seconds() < 5:
+                try:
+                    await ch.delete()
+                except:
+                    continue
+    finally:
+        # إزالة السيرفر من قائمة المهام بعد الانتهاء
+        active_cleanups.discard(guild.id)
+
 
 
 
