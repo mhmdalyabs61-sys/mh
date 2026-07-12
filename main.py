@@ -285,15 +285,58 @@ async def on_guild_channel_update(before, after):
             await after.edit(name=before.name)
             break
 
+# قائمة لتتبع العمليات الجارية (لمنع تكرار التنفيذ)
+active_restorations = set()
+
 @bot.event
-async def on_guild_role_delete(role):
-    data = {'name': role.name, 'color': role.color, 'perms': role.permissions}
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await handle_protection(role.guild, entry.user, "حذف رتبة", role.name, "تبنيد المخرب + استرجاع الرتبة", f"تمت إعادة إنشاء الرتبة: {role.name}")
-        try: await role.guild.create_role(**data)
-        except: pass
+async def on_guild_channel_delete(channel):
+    # 1. التحقق من السجلات (Audit Logs)
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+        # تجاهل إذا كان الشخص في القائمة البيضاء
+        if entry.user.id in bot_data.get('whitelisted', []):
+            return
+
+        # 2. تبنيد المخرب فوراً
+        try:
+            await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Deletion")
+        except:
+            pass
+
+        # 3. إرسال اللوق باستخدام دالتك الأصلية
+        asyncio.create_task(handle_protection(
+            guild=channel.guild, 
+            user=entry.user, 
+            action_name="حذف رومات", 
+            target=channel.name, 
+            action_type="استرجاع القناة فوراً"
+        ))
+
+        # 4. استرجاع القناة (بدون تعليق البوت)
+        if channel.guild.id not in active_restorations:
+            active_restorations.add(channel.guild.id)
+            asyncio.create_task(fast_restore(channel))
         break
+
+async def fast_restore(channel):
+    """دالة استرجاع القناة في الخلفية"""
+    try:
+        # الانتظار لجزء بسيط من الثانية لضمان اكتمال الحدث
+        await asyncio.sleep(0.1)
+        
+        # إعادة إنشاء القناة بنفس الإعدادات
+        await channel.guild.create_text_channel(
+            name=channel.name,
+            category=channel.category,
+            position=channel.position,
+            overwrites=channel.overwrites,
+            topic=channel.topic,
+            nsfw=channel.nsfw
+        )
+    except Exception as e:
+        print(f"Error restoring channel: {e}")
+    finally:
+        active_restorations.discard(channel.guild.id)
+
 
 @bot.event
 async def on_guild_role_create(role):
