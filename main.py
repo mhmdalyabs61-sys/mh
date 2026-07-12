@@ -216,8 +216,11 @@ protected_channels = set()
 @bot.event
 async def on_guild_channel_create(channel):
     # 1. القائمة البيضاء
-    if any(entry.user.id in bot_data.get('whitelisted', []) for entry in await channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create).flatten()):
-        return
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        if entry.user.id in bot_data.get('whitelisted', []):
+            return
+        break # لا تنسى الـ break للخروج من حلقة السجلات
+
 
     # 2. إذا كانت القناة في قائمة "المحمية"، لا تحذفها
     if channel.id in protected_channels:
