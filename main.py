@@ -210,45 +210,61 @@ async def handle_protection(guild, user, action_name, target, action_type, detai
 # --- أحداث الحماية الشاملة ---
 
 
-# قائمة مؤقتة للقنوات التي أنشأها البوت (لا يجب لمسها)
+# قائمة القنوات التي أنشأها البوت (لا يجب لمسها)
 protected_channels = set()
 
+# --- حماية إنشاء القنوات ---
 @bot.event
 async def on_guild_channel_create(channel):
-    # 1. القائمة البيضاء
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.user.id in bot_data.get('whitelisted', []):
+        # 1. إذا كان الفاعل هو البوت أو في القائمة البيضاء -> تجاهل
+        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []):
             return
-        break # لا تنسى الـ break للخروج من حلقة السجلات
+        
+        # 2. إذا كانت القناة محمية (أنشأها البوت) -> تجاهل
+        if channel.id in protected_channels:
+            return
 
+        # 3. هجوم حقيقي: تبنيد + حذف الروم + لوق
+        try:
+            await channel.guild.ban(entry.user, reason="Anti-Nuke: Unsafe Creation")
+            await channel.delete()
+        except:
+            pass
 
-    # 2. إذا كانت القناة في قائمة "المحمية"، لا تحذفها
-    if channel.id in protected_channels:
-        return
+        asyncio.create_task(handle_protection(channel.guild, entry.user, "إنشاء رومات", channel.name, "حذف + تبنيد"))
+        break
 
-    # بقية كود الحماية (تبنيد + حذف)
-    # ... (ضع كود الباند واللوق هنا)
-    
-    # عند الحذف:
-    await channel.delete()
-
+# --- حماية حذف القنوات ---
 @bot.event
 async def on_guild_channel_delete(channel):
-    # إذا البوت هو من حذفها، لا تسترجعها
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.user.id == bot.user.id:
-            return 
+        # 1. إذا كان الفاعل هو البوت أو في القائمة البيضاء -> تجاهل
+        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []):
+            return
 
-        # 3. قبل الاسترجاع، ضف القناة للقائمة المحمية
-        protected_channels.add(channel.id) # هذا هو مفتاح الحل
-        
-        # استرجاع القناة
-        new_ch = await channel.guild.create_text_channel(...)
-        
-        # 4. بعد فترة، أزلها من القائمة المحمية
-        await asyncio.sleep(10)
-        protected_channels.discard(channel.id)
+        # 2. هجوم حقيقي: تبنيد + استرجاع الروم + لوق
+        try:
+            await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Deletion")
+            
+            # حماية: إضافة للقائمة قبل الإنشاء
+            protected_channels.add(channel.id)
+            
+            new_ch = await channel.guild.create_text_channel(
+                name=channel.name, category=channel.category,
+                position=channel.position, overwrites=channel.overwrites,
+                topic=channel.topic, nsfw=channel.nsfw
+            )
+            
+            # إزالة من الحماية بعد فترة قصيرة
+            await asyncio.sleep(10)
+            protected_channels.discard(channel.id)
+        except:
+            pass
+
+        asyncio.create_task(handle_protection(channel.guild, entry.user, "حذف رومات", channel.name, "استرجاع + تبنيد"))
         break
+
 
 
 
