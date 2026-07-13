@@ -9,7 +9,7 @@ from threading import Thread
 import google.generativeai as genai
 
 # إعداد الذكاء الاصطناعي (ضع المفتاح حقك هنا)
-genai.configure(api_key="import os
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 import google.generativeai as genai
 
 # البوت سيقرأ المفتاح من إعدادات Render تلقائياً
