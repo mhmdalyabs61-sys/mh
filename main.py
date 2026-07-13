@@ -399,7 +399,8 @@ async def on_message(message):
             response = model.generate_content(message.content)
             await message.channel.send(response.text)
         except Exception as e:
-            await message.channel.send("عفواً، واجهت مشكلة في التفكير! حاول مرة أخرى.")
+            await message.channel.send(f"❌ خطأ تقني: `{str(e)}`")
+
 
     # هذا ضروري عشان يكمل البوت يشغل أوامر الحماية (الحذف والتبنيد)
     await bot.process_commands(message)
