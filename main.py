@@ -13,12 +13,10 @@ genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 import google.generativeai as genai
 
-# البوت سيقرأ المفتاح من إعدادات Render تلقائياً
 api_key = os.environ.get("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
 model = genai.GenerativeModel('gemini-pro')
-") # نسخت لك المفتاح اللي طلع في صورتك
-model = genai.GenerativeModel('gemini-pro')
+
 
 # --- تعريف البيانات الأساسية (لازم تكون فوق أي دالة) ---
 server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
