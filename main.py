@@ -6,6 +6,19 @@ from datetime import timedelta, datetime
 from typing import Union, Optional, List, Dict
 from flask import Flask
 from threading import Thread
+import google.generativeai as genai
+
+# إعداد الذكاء الاصطناعي (ضع المفتاح حقك هنا)
+genai.configure(api_key="import os
+import google.generativeai as genai
+
+# البوت سيقرأ المفتاح من إعدادات Render تلقائياً
+api_key = os.environ.get("GEMINI_API_KEY")
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel('gemini-pro')
+") # نسخت لك المفتاح اللي طلع في صورتك
+model = genai.GenerativeModel('gemini-pro')
+
 # --- تعريف البيانات الأساسية (لازم تكون فوق أي دالة) ---
 server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
 whitelist = set()
@@ -374,6 +387,23 @@ async def on_webhooks_update(channel):
 
 
 
+@bot.event
+async def on_message(message):
+    # عشان البوت ما يرد على نفسه
+    if message.author == bot.user:
+        return
+
+    # إذا الشخص سوى منشن للبوت، البوت بيرد عليه
+    if bot.user.mentioned_in(message):
+        try:
+            # يرسل السؤال لـ Gemini
+            response = model.generate_content(message.content)
+            await message.channel.send(response.text)
+        except Exception as e:
+            await message.channel.send("عفواً، واجهت مشكلة في التفكير! حاول مرة أخرى.")
+
+    # هذا ضروري عشان يكمل البوت يشغل أوامر الحماية (الحذف والتبنيد)
+    await bot.process_commands(message)
 
 
 
