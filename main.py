@@ -6,16 +6,19 @@ from datetime import timedelta, datetime
 from typing import Union, Optional, List, Dict
 from flask import Flask
 from threading import Thread
-import google.generativeai as genai
 
-# إعداد الذكاء الاصطناعي (ضع المفتاح حقك هنا)
+
+import google.generativeai as genai
+import os
+
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-import google.generativeai as genai
+# كود كشف الموديلات (سيظهر في الـ Logs في Render)
+for m in genai.list_models():
+    if 'generateContent' in m.supported_generation_methods:
+        print(f"✅ الموديل المتاح في حسابك: {m.name}")
 
-api_key = os.environ.get("GEMINI_API_KEY")
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-1.5-flash-001')
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 
 
