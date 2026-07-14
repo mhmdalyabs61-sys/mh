@@ -8,13 +8,14 @@ from flask import Flask
 from threading import Thread
 import discord
 from discord.ext import commands
-from groq import Groq
 import os
+from groq import Groq
 
-# إعداد العميل
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# إعداد المتغيرات
+GROQ_API = os.environ.get("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API)
 
-# دالة الذكاء الاصطناعي (العقل)
+# كود الذكاء الاصطناعي (العقل)
 def get_ai_answer(user_question):
     response = client.chat.completions.create(
         messages=[
@@ -25,24 +26,23 @@ def get_ai_answer(user_question):
     )
     return response.choices[0].message.content
 
-# منطق المنشن (يُوضع داخل ملف البوت الرئيسي الخاص بك)
+# كود المنشن
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    # تحقق إذا تم منشن البوت
     if bot.user.mentioned_in(message):
         # تنظيف الرسالة من المنشن
         user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
         
         if user_question:
             async with message.channel.typing():
-                # استدعاء دالة الذكاء الاصطناعي
                 answer = get_ai_answer(user_question)
                 await message.channel.send(answer)
 
     await bot.process_commands(message)
+
 
 
 
