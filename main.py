@@ -10,54 +10,40 @@ import discord
 from discord.ext import commands
 from groq import Groq
 import os
-import asyncio
 
-# إعداد الربط البرمجي الكامل مع Groq
+# إعداد العميل
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# إعدادات البوت والـ Intents
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+# دالة الذكاء الاصطناعي (العقل)
+def get_ai_answer(user_question):
+    response = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": "أنت موسوعة شاملة ومعرفة بكل شيء. أجب على أي سؤال يطرحه المستخدم بدقة."},
+            {"role": "user", "content": user_question}
+        ],
+        model="llama3-8b-8192",
+    )
+    return response.choices[0].message.content
 
-# معالج أحداث الذكاء الاصطناعي عند استقبال أي رسالة
+# منطق المنشن (يُوضع داخل ملف البوت الرئيسي الخاص بك)
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    # معالجة الرسالة وإرسالها للذكاء الاصطناعي
-    if isinstance(message.channel, discord.DMChannel):
-        async with message.channel.typing():
-            try:
-                # إرسال المحتوى للنموذج
-                response = client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": "أنت مساعد ذكي ومفيد. أجب على أي سؤال يطرحه المستخدم بوضوح واختصار."},
-                        {"role": "user", "content": message.content}
-                    ],
-                    model="llama3-8b-8192",
-                )
-                
-                # استخراج الرد
-                ai_answer = response.choices[0].message.content
-                
-                # تقسيم الرد إذا كان طويلاً جداً
-                if len(ai_answer) > 2000:
-                    for i in range(0, len(ai_answer), 2000):
-                        await message.channel.send(ai_answer[i:i+2000])
-                else:
-                    await message.channel.send(ai_answer)
-                    
-            except Exception as e:
-                await message.channel.send(f"⚠️ حدث خطأ في معالجة الطلب: {str(e)}")
+    # تحقق إذا تم منشن البوت
+    if bot.user.mentioned_in(message):
+        # تنظيف الرسالة من المنشن
+        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+        
+        if user_question:
+            async with message.channel.typing():
+                # استدعاء دالة الذكاء الاصطناعي
+                answer = get_ai_answer(user_question)
+                await message.channel.send(answer)
 
     await bot.process_commands(message)
 
-# حدث جاهزية البوت
-@bot.event
-async def on_ready():
-    print(f'نظام الذكاء الاصطناعي يعمل الآن بنجاح: {bot.user}')
 
 
 
