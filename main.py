@@ -378,27 +378,41 @@ async def on_webhooks_update(channel):
 
 
 
-# 1. ضع هذه في أعلى الملف مع باقي الـ imports:
+# --- كود الذكاء الاصطناعي الكامل ---
 from groq import Groq
+import os
 
-# 2. ضع هذه مباشرة بعد تعريف الـ bot (مكان تعريف العميل):
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# تعريف العميل (هذا هو السطر الذي ينقصك)
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# 3. ضع هذه الدالة في أي مكان (مثلاً قبل الأحداث):
+# دالة الذكاء الاصطناعي
 def get_ai_answer(user_question):
-    response = groq_client.chat.completions.create(
+    response = client.chat.completions.create(
         messages=[{"role": "user", "content": user_question}],
         model="llama-3.1-8b-instant",
     )
     return response.choices[0].message.content
 
-# 4. إذا كان عندك حدث on_message في ملفك، لا تضع هذه الدالة فوقها،
-# بل أضف هذا السطر فقط داخل الـ on_message الموجودة عندك:
+# حدث المنشن (تأكد أن bot معرف مسبقاً في ملفك)
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+
     if bot.user.mentioned_in(message):
         user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
         if user_question:
             async with message.channel.typing():
-                await message.channel.send(get_ai_answer(user_question))
+                try:
+                    answer = get_ai_answer(user_question)
+                    await message.channel.send(answer)
+                except Exception as e:
+                    print(f"Error: {e}")
+                    await message.channel.send("عذراً، حدث خطأ.")
+
+    await bot.process_commands(message)
+# --- نهاية الكود ---
+
 
 
 
