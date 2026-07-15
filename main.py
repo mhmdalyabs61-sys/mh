@@ -419,6 +419,36 @@ def get_ai_answer(user_id, user_question):
         user_histories[user_id].pop(1)
         
     return answer
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+
+    # منطق التشغيل: إذا منشنته أو سويت reply لرسالته
+    should_reply = False
+    
+    # 1. حالة المنشن
+    if bot.user.mentioned_in(message):
+        should_reply = True
+        
+    # 2. حالة الرد على رسالة (Reply)
+    if message.reference and message.reference.resolved:
+        if message.reference.resolved.author == bot.user:
+            should_reply = True
+
+    if should_reply:
+        # تنظيف السؤال من المنشنات
+        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+        
+        if user_question:
+            async with message.channel.typing():
+                answer = get_ai_answer(message.author.id, user_question)
+                # استخدام reply عشان يظهر أن البوت يرد على رسالتك تحديداً
+                await message.reply(answer)
+        else:
+            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
+
+    await bot.process_commands(message)
 
 
 
