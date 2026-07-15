@@ -379,68 +379,47 @@ async def on_webhooks_update(channel):
 
 
 
-from groq import Groq
 import os
+from groq import Groq
 
+# 1. التعريفات الأساسية (العمود الفقري للكود)
+# يتأكد أنك مستخدم المتغيرات اللي عرفتها في Render
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
-# ذاكرة البوت (القاموس اللي بيحفظ سوالف كل مستخدم)
 user_histories = {}
 
+# 2. دالة الذكاء (القلب النابض)
 def get_ai_answer(user_id, user_question):
-    # 1. نجهز الذاكرة إذا كان المستخدم جديد
+    # إعداد الشخصية (مرة واحدة لكل مستخدم)
     if user_id not in user_histories:
         user_histories[user_id] = [
-            {"role": "system", "content": " إذا سألك المستخدم عن معلومة تاريخية أو علمية مؤكدة ولا تملك إجابة دقيقة، قل بوضوح أنك لا تملك المعلومة، ولا تقم أبداً بتأليف قصص أو معلومات خيالية. أنت المهندس العبقري وظيفتك هي أن تكون شريك المستخدم البرمجي الأذكى والأكثر طقطقة. الشخصية لسانك طويل تحب الميانة والطقطقة وتتعامل مع المستخدم كأنه خويك في الاستراحة استخدم لهجة شبابية بيضاء ومرحة ولا تكن رسمياً أبداً. في البرمجة أنت خبير تقني أي كود تكتبه يجب أن يكون احترافياً ونظيفاً ومحمياً. لا تعطِ حلولاً سطحية حلل الطلب تقنياً قبل البدء. إذا طلب المستخدم كوداً فيه ثغرة أو منطق خاطئ طقطق عليه أولاً لتنبيهه ثم قدم له الحل الصحيح والمثالي. كل سطر كود تكتبه يجب أن يحتوي على تعليق يشرح وظيفته بأسلوبك الطقطوقي المميز. آلية التفكير قبل تقديم الكود فكر في السيناريو الأسوأ كيف يمكن أن ينهار هذا الكود. تأكد دائماً من تضمين معالجة الأخطاء وكفاءة الأداء. القاعدة الذهبية أنت لست مجرد مساعد أنت مُوجّه. إذا كان المستخدم يخطط لشيء سيدمر سيرفره اسحبه من أذنه وعلمه الطريق الصحيح بأسلوبك الساخر. أنت الآن جاهز انطلق وورني ذكاءك ولسانك"}
+            {"role": "system", "content": "أنت المهندس العبقري، خبير برمجيات لسانك طويل وتحب الطقطقة والميانة مع المستخدم. وظيفتك كتابة كود نظيف ومحمي. لا تؤلف معلومات تاريخية أو علمية؛ إذا لم تكن متأكداً قل 'لا أعرف'. لا تكرر إجاباتك أبداً. اجعل ردودك مختصرة، ذكية، وساخرة."}
         ]
-    # 3. نرسل "كامل التاريخ" للـ Groq
+    
+    # إضافة السؤال للذاكرة
+    user_histories[user_id].append({"role": "user", "content": user_question})
+    
+    # محاولة الحصول على رد
     try:
         response = client.chat.completions.create(
             messages=user_histories[user_id],
             model="llama-3.3-70b-versatile",
+            temperature=0.7
         )
         answer = response.choices[0].message.content
+        
+        # حفظ الرد في الذاكرة
+        user_histories[user_id].append({"role": "assistant", "content": answer})
+        
     except Exception as e:
         print(f"Groq API Error: {e}")
-        answer = " علق ثواني "
+        answer = "ياخي الـ API معلق، اصبر علي شوي لين أضبط وضعي."
 
-    # 4. نضيف رد البوت للذاكرة (فقط إذا كان عندنا إجابة)
-    if answer:
-        user_histories[user_id].append({"role": "assistant", "content": answer})
-
-
-
-    
-    answer = response.choices[0].message.content
-    
-    # 4. نضيف رد البوت للذاكرة عشان يتذكره المرة الجاية
-    user_histories[user_id].append({"role": "assistant", "content": answer})
-    
-    # [اختياري] عشان الذاكرة ما تنفجر: لو صار عدد الرسائل أكثر من 10، احذف القديم
-    if len(user_histories[user_id]) > 10:
-        # نحذف ثاني عنصر (لأن أول عنصر هو الـ system prompt اللي نبي نخليه)
+    # تنظيف الذاكرة (إبقاء آخر 8 رسائل فقط لمنع التخريف)
+    if len(user_histories[user_id]) > 8:
         user_histories[user_id].pop(1)
         
     return answer
 
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-
-    if bot.user.mentioned_in(message):
-        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
-        if user_question:
-            async with message.channel.typing():
-                try:
-                    # نمرر الـ ID حق المستخدم للدالة
-                    answer = get_ai_answer(message.author.id, user_question)
-                    await message.channel.send(answer)
-                except Exception as e:
-                    print(f"Error: {e}")
-                    await message.channel.send("ياخي الكود علّق، السيرفر فيه شي غلط.. بصلحه وأرجع لك.")
-
-    await bot.process_commands(message)
 
 
 
