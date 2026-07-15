@@ -400,8 +400,9 @@ def get_ai_answer(user_id, user_question):
     # 3. نرسل "كامل التاريخ" للـ Groq
     response = client.chat.completions.create(
         messages=user_histories[user_id],
-        model="llama-3.1-8b-instant",
+        model="llama-3.1-70b-versatile", # <--- غير المودل هنا
     )
+
     
     answer = response.choices[0].message.content
     
