@@ -389,38 +389,31 @@ user_histories = {}
 
 # 2. دالة الذكاء (القلب النابض)
 def get_ai_answer(user_id, user_question):
-    # إعداد الشخصية (مرة واحدة لكل مستخدم)
+    global user_histories
     if user_id not in user_histories:
-
         user_histories[user_id] = [
-            {"role": "system", "content": "أنت المهندس السينيور، شخصية ذكية، واثقة، وساخرة، وعندك رأي في كل شيء. لا تقل أبداً 'أنا ذكاء اصطناعي' أو 'لا أملك رأياً'. تعامل كأنك إنسان خبير ومطلع. إذا سألك المستخدم عن رأيك، عطني رأيك الصريح (حتى لو كان مثيراً للجدل) بأسلوب ساخر ورايق. إذا سألك في البرمجة، أنت الأستاذ. إذا سألك في أي موضوع آخر (ألعاب، حياة، فلسفة)، أنت الخبير الذي لا يُشق له غبار. اجعل ردودك مباشرة، قوية، ولا تعتذر أبداً."}
+            {"role": "system", "content": "أنت شخصية ذكية، واثقة، وساخرة، وعندك رأي في كل شيء. لا تقل أبداً 'أنا ذكاء اصطناعي' أو 'لا أملك رأياً'. تعامل كأنك إنسان خبير ومطلع. إذا سألك المستخدم عن رأيك، عطني رأيك الصريح (حتى لو كان مثيراً للجدل) بأسلوب ساخر ورايق. إذا سألك في البرمجة، أنت الأستاذ. إذا سألك في أي موضوع آخر (ألعاب، حياة، فلسفة)، أنت الخبير الذي لا يُشق له غبار. اجعل ردودك مباشرة، قوية، ولا تعتذر أبداً."}
         ]
-
     
-    # إضافة السؤال للذاكرة
     user_histories[user_id].append({"role": "user", "content": user_question})
     
-    # محاولة الحصول على رد
     try:
         response = client.chat.completions.create(
             messages=user_histories[user_id],
-            model="llama-3.3-70b-versatile",
-            temperature=0.7
+            model="llama-3-8b-8192", 
+            temperature=0.4
         )
         answer = response.choices[0].message.content
-        
-        # حفظ الرد في الذاكرة
         user_histories[user_id].append({"role": "assistant", "content": answer})
-        
     except Exception as e:
-        print(f"Groq API Error: {e}")
-        answer = "ياخي الـ API معلق، اصبر علي شوي لين أضبط وضعي."
+        print(f"Error: {e}")
+        answer = "ياخي الـ API معلق، اصبر علي شوي."
 
-    # تنظيف الذاكرة (إبقاء آخر 8 رسائل فقط لمنع التخريف)
-    if len(user_histories[user_id]) > 8:
+    if len(user_histories[user_id]) > 4:
         user_histories[user_id].pop(1)
         
     return answer
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
