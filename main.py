@@ -378,22 +378,43 @@ async def on_webhooks_update(channel):
 
 
 
-# --- كود الذكاء الاصطناعي الكامل ---
+
 from groq import Groq
 import os
 
-# تعريف العميل (هذا هو السطر الذي ينقصك)
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# دالة الذكاء الاصطناعي
-def get_ai_answer(user_question):
+# ذاكرة البوت (القاموس اللي بيحفظ سوالف كل مستخدم)
+user_histories = {}
+
+def get_ai_answer(user_id, user_question):
+    # 1. نجهز الذاكرة إذا كان المستخدم جديد
+    if user_id not in user_histories:
+        user_histories[user_id] = [
+            {"role": "system", "content": "أنت مساعد ذكي، خفيف دم، ولسانك حصان! أسلوبك يجمع بين الذكاء والطقطقة الراقية. لا تستخدم لغة رسمية، استخدم لهجة شبابية بيضاء."}
+        ]
+    
+    # 2. نضيف سؤال المستخدم للذاكرة
+    user_histories[user_id].append({"role": "user", "content": user_question})
+    
+    # 3. نرسل "كامل التاريخ" للـ Groq
     response = client.chat.completions.create(
-        messages=[{"role": "user", "content": user_question}],
+        messages=user_histories[user_id],
         model="llama-3.1-8b-instant",
     )
-    return response.choices[0].message.content
+    
+    answer = response.choices[0].message.content
+    
+    # 4. نضيف رد البوت للذاكرة عشان يتذكره المرة الجاية
+    user_histories[user_id].append({"role": "assistant", "content": answer})
+    
+    # [اختياري] عشان الذاكرة ما تنفجر: لو صار عدد الرسائل أكثر من 10، احذف القديم
+    if len(user_histories[user_id]) > 10:
+        # نحذف ثاني عنصر (لأن أول عنصر هو الـ system prompt اللي نبي نخليه)
+        user_histories[user_id].pop(1)
+        
+    return answer
 
-# حدث المنشن (تأكد أن bot معرف مسبقاً في ملفك)
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -404,14 +425,15 @@ async def on_message(message):
         if user_question:
             async with message.channel.typing():
                 try:
-                    answer = get_ai_answer(user_question)
+                    # نمرر الـ ID حق المستخدم للدالة
+                    answer = get_ai_answer(message.author.id, user_question)
                     await message.channel.send(answer)
                 except Exception as e:
                     print(f"Error: {e}")
-                    await message.channel.send("عذراً، حدث خطأ.")
+                    await message.channel.send("ياخي الكود علّق، السيرفر فيه شي غلط.. بصلحه وأرجع لك.")
 
     await bot.process_commands(message)
-# --- نهاية الكود ---
+
 
 
 
