@@ -8,40 +8,7 @@ from flask import Flask
 from threading import Thread
 import discord
 from discord.ext import commands
-import os
-from groq import Groq
 
-# إعداد المتغيرات
-GROQ_API = os.environ.get("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API)
-
-# كود الذكاء الاصطناعي (العقل)
-def get_ai_answer(user_question):
-    response = client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": "أنت موسوعة شاملة ومعرفة بكل شيء. أجب على أي سؤال يطرحه المستخدم بدقة."},
-            {"role": "user", "content": user_question}
-        ],
-        model="llama3-8b-8192",
-    )
-    return response.choices[0].message.content
-
-# كود المنشن
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-
-    if bot.user.mentioned_in(message):
-        # تنظيف الرسالة من المنشن
-        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
-        
-        if user_question:
-            async with message.channel.typing():
-                answer = get_ai_answer(user_question)
-                await message.channel.send(answer)
-
-    await bot.process_commands(message)
 
 
 
@@ -411,6 +378,43 @@ async def on_webhooks_update(channel):
 
 
 
+# --- بداية إضافة الذكاء الاصطناعي ---
+from groq import Groq
+
+# إعداد العميل (يسحب المفتاح من المتغيرات تلقائياً)
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+# دالة الرد بالذكاء الاصطناعي
+def get_ai_answer(user_question):
+    response = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": "أنت موسوعة شاملة. أجب على أي سؤال بدقة."},
+            {"role": "user", "content": user_question}
+        ],
+        model="llama3-8b-8192",
+    )
+    return response.choices[0].message.content
+
+# حدث المنشن (يربط الديسكورد بالذكاء الاصطناعي)
+@bot.event
+async def on_message(message):
+    # تجاهل رسائل البوت نفسه
+    if message.author == bot.user:
+        return
+
+    # إذا تم منشن البوت
+    if bot.user.mentioned_in(message):
+        # تنظيف الرسالة من المنشن
+        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+        
+        if user_question:
+            async with message.channel.typing():
+                answer = get_ai_answer(user_question)
+                await message.channel.send(answer)
+
+    # هذا السطر مهم جداً عشان الأوامر الثانية (مثل !help) ما تتعطل
+    await bot.process_commands(message)
+# --- نهاية إضافة الذكاء الاصطناعي ---
 
 
 
