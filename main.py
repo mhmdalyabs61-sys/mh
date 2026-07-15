@@ -378,43 +378,28 @@ async def on_webhooks_update(channel):
 
 
 
-# --- بداية إضافة الذكاء الاصطناعي ---
+# 1. ضع هذه في أعلى الملف مع باقي الـ imports:
 from groq import Groq
 
-# إعداد العميل (يسحب المفتاح من المتغيرات تلقائياً)
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# 2. ضع هذه مباشرة بعد تعريف الـ bot (مكان تعريف العميل):
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# دالة الرد بالذكاء الاصطناعي
+# 3. ضع هذه الدالة في أي مكان (مثلاً قبل الأحداث):
 def get_ai_answer(user_question):
-    response = client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": "أنت موسوعة شاملة. أجب على أي سؤال بدقة."},
-            {"role": "user", "content": user_question}
-        ],
-        model="llama3-8b-8192",
+    response = groq_client.chat.completions.create(
+        messages=[{"role": "user", "content": user_question}],
+        model="llama-3.1-8b-instant",
     )
     return response.choices[0].message.content
 
-# حدث المنشن (يربط الديسكورد بالذكاء الاصطناعي)
-@bot.event
-async def on_message(message):
-    # تجاهل رسائل البوت نفسه
-    if message.author == bot.user:
-        return
-
-    # إذا تم منشن البوت
+# 4. إذا كان عندك حدث on_message في ملفك، لا تضع هذه الدالة فوقها،
+# بل أضف هذا السطر فقط داخل الـ on_message الموجودة عندك:
     if bot.user.mentioned_in(message):
-        # تنظيف الرسالة من المنشن
         user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
-        
         if user_question:
             async with message.channel.typing():
-                answer = get_ai_answer(user_question)
-                await message.channel.send(answer)
+                await message.channel.send(get_ai_answer(user_question))
 
-    # هذا السطر مهم جداً عشان الأوامر الثانية (مثل !help) ما تتعطل
-    await bot.process_commands(message)
-# --- نهاية إضافة الذكاء الاصطناعي ---
 
 
 
