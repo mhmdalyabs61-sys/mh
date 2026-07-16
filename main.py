@@ -377,54 +377,64 @@ async def on_webhooks_update(channel):
 
 
 
+import os
 import discord
 from discord.ext import commands
-from google import genai
-import os
+from groq import Groq
 
-# إعداد العميل للمكتبة الجديدة
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-
-# إعدادات البوت والـ Intents
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-print(client.models.list())
-# ذاكرة المحادثات
+# إعدادات البوت والـ API
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 user_histories = {}
 
+# دالة الذكاء
 def get_ai_answer(user_id, user_question):
+    global user_histories
     if user_id not in user_histories:
-        # جرب هذا الاسم بدون 'models/'
-        user_histories[user_id] = client.chats.create(model="gemini-3.0-flash-preview")
+        user_histories[user_id] = [
+            {"role": "system", "content": "ردودك نختصره جدا لا تتعدى 200 حرف أنت شخصية ذكية، واثقة، وساخرة، وعندك رأي في كل شيء. لا تقل أبداً 'أنا ذكاء اصطناعي' أو 'لا أملك رأياً'. تعامل كأنك إنسان خبير ومطلع. إذا سألك المستخدم عن رأيك، عطني رأيك الصريح (حتى لو كان مثيراً للجدل) بأسلوب ساخر ورايق. إذا سألك في البرمجة، أنت الأستاذ. إذا سألك في أي موضوع آخر (ألعاب، حياة، فلسفة)، أنت الخبير الذي لا يُشق له غبار. اجعل ردودك مباشرة، قوية، ولا تعتذر أبداً."}
+        ]
     
-    chat = user_histories[user_id]
+    user_histories[user_id].append({"role": "user", "content": user_question})
     
     try:
-        response = chat.send_message(user_question)
-        answer = response.text
-        if len(answer) > 200:
-            answer = answer[:200] + "..."
-        return answer
+        response = client.chat.completions.create(
+            messages=user_histories[user_id],
+            model="llama-3.1-8b-instant",
+            temperature=0.4
+        )
+        answer = response.choices[0].message.content
+        user_histories[user_id].append({"role": "assistant", "content": answer})
     except Exception as e:
         print(f"Error: {e}")
-        return "معليش، فيه مشكلة في الـ API."
+        answer = "ياخي الـ API معلق، اصبر علي شوي."
+    
+    if len(answer) > 200:
+        answer = answer[:200] + "..."
+    
+    if len(user_histories[user_id]) > 4:
+        user_histories[user_id].pop(1)
+        
+    return answer
 
-
+# دالة المنشن والرد
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    # التحقق من المنشن
-    if bot.user.mentioned_in(message):
+    if bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user):
         user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
         
-        # استدعاء دالة الذكاء الاصطناعي
-        answer = get_ai_answer(str(message.author.id), user_question)
-        
-        # إرسال الرد
-        await message.channel.send(answer)
+        if user_question:
+            async with message.channel.typing():
+                answer = get_ai_answer(message.author.id, user_question)
+                await message.reply(answer)
+        else:
+            await message.reply("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
+
+    await bot.process_commands(message)
+
 
 
 
