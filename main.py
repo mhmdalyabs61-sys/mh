@@ -376,6 +376,7 @@ async def on_webhooks_update(channel):
 
 
 
+
 import discord
 from discord.ext import commands
 from google import genai
@@ -427,7 +428,6 @@ async def on_message(message):
         
         # إرسال الرد
         await message.channel.send(answer)
-
 
 
 
