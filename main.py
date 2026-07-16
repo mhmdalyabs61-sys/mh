@@ -403,9 +403,10 @@ def get_ai_answer(user_id, user_question):
     try:
         response = chat.send_message(user_question)
         answer = response.text
-        if len(answer) > 200:
-        answer = answer[:200] + "..."
-        return answer
+                if len(answer) > 200:
+                    answer = answer[:200] + "..."
+                return answer
+
     except Exception as e:
         print(f"Error: {e}")
         return "ياخي الـ API معلق، اصبر علي شوي."
