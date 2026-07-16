@@ -408,10 +408,12 @@ def get_ai_answer(user_id, user_question):
     except Exception as e:
         print(f"Error: {e}")
         answer = "ياخي الـ API معلق، اصبر علي شوي."
+
+      
         # قص الرد برمجياً عند 200 حرف
         if len(answer) > 200:
             answer = answer[:200] + "..."
-
+    
     if len(user_histories[user_id]) > 4:
         user_histories[user_id].pop(1)
         
