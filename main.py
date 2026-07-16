@@ -395,13 +395,14 @@ user_histories = {}
 
 def get_ai_answer(user_id, user_question):
     if user_id not in user_histories:
-        # هذا السطر سيطبع لنا الموديلات المتاحة في الـ Logs
-        print(f"DEBUG_MODELS: {[m.name for m in client.models.list()]}")
-        user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
+        # هذا الكود يجلب الموديلات المتاحة لحسابك ويختار أحدها
+        models = client.models.list()
+        # نختار أول موديل متاح في القائمة التي يدعمها حسابك
+        model_name = next((m.name for m in models if "flash" in m.name), "gemini-1.5-flash")
+        print(f"DEBUG: Using model {model_name}")
+        user_histories[user_id] = client.chats.create(model=model_name)
     
     chat = user_histories[user_id]
-    # ... باقي الكود
-
     
     try:
         response = chat.send_message(user_question)
@@ -409,10 +410,9 @@ def get_ai_answer(user_id, user_question):
         if len(answer) > 200:
             answer = answer[:200] + "..."
         return answer
-
     except Exception as e:
         print(f"Error: {e}")
-        return "ياخي الـ API معلق، اصبر علي شوي."
+        return "الموديل معلق حالياً، جرب بعد ثواني."
 
 @bot.event
 async def on_message(message):
