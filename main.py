@@ -395,12 +395,8 @@ user_histories = {}
 
 def get_ai_answer(user_id, user_question):
     if user_id not in user_histories:
-        # هذا الكود يجلب الموديلات المتاحة لحسابك ويختار أحدها
-        models = client.models.list()
-        # نختار أول موديل متاح في القائمة التي يدعمها حسابك
-        model_name = next((m.name for m in models if "flash" in m.name), "gemini-2.5-flash")
-        print(f"DEBUG: Using model {model_name}")
-        user_histories[user_id] = client.chats.create(model=model_name)
+        # جرب هذا الاسم بدون 'models/'
+        user_histories[user_id] = client.chats.create(model="gemini-2.5-flash")
     
     chat = user_histories[user_id]
     
@@ -412,7 +408,8 @@ def get_ai_answer(user_id, user_question):
         return answer
     except Exception as e:
         print(f"Error: {e}")
-        return "الموديل معلق حالياً، جرب بعد ثواني."
+        return "معليش، فيه مشكلة في الـ API."
+
 
 @bot.event
 async def on_message(message):
