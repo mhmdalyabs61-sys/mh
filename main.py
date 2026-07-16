@@ -396,6 +396,10 @@ def get_ai_answer(user_id, user_question):
     # تصحيح التنسيق هنا
     if user_id not in user_histories:
 # غيّر السطر إلى هذا:
+
+
+
+
 user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
 
     
