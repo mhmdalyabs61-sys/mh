@@ -388,7 +388,7 @@ client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-
+print(client.models.list())
 # ذاكرة المحادثات
 user_histories = {}
 
