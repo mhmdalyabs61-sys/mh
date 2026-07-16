@@ -392,7 +392,9 @@ user_histories = {}
 
 def get_ai_answer(user_id, user_question):
     if user_id not in user_histories:
-        user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
+# بدل السطر القديم بهذا السطر بالضبط:
+user_histories[user_id] = client.chats.create(model="gemini-1.5-flash-002")
+
     
     chat = user_histories[user_id]
     
