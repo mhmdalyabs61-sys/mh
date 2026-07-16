@@ -401,11 +401,12 @@ def get_ai_answer(user_id, user_question):
     chat = user_histories[user_id]
     
     try:
-        response = chat.send_message(user_question)
-        answer = response.text
-                if len(answer) > 200:
-                    answer = answer[:200] + "..."
-                return answer
+    response = chat.send_message(user_question)
+    answer = response.text
+    if len(answer) > 200:
+        answer = answer[:200] + "..."
+    return answer
+
 
     except Exception as e:
         print(f"Error: {e}")
