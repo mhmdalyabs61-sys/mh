@@ -398,7 +398,7 @@ def get_ai_answer(user_id, user_question):
         # هذا الكود يجلب الموديلات المتاحة لحسابك ويختار أحدها
         models = client.models.list()
         # نختار أول موديل متاح في القائمة التي يدعمها حسابك
-        model_name = next((m.name for m in models if "flash" in m.name), "gemini-1.5-flash")
+        model_name = next((m.name for m in models if "flash" in m.name), "gemini-2.5-flash")
         print(f"DEBUG: Using model {model_name}")
         user_histories[user_id] = client.chats.create(model=model_name)
     
