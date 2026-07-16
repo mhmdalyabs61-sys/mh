@@ -396,10 +396,8 @@ user_histories = {}
 def get_ai_answer(user_id, user_question):
     # تصحيح التنسيق هنا
     if user_id not in user_histories:
-    user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
+        user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
 
-
-    
     chat = user_histories[user_id]
     
     try:
@@ -408,7 +406,6 @@ def get_ai_answer(user_id, user_question):
         if len(answer) > 200:
             answer = answer[:200] + "..."
         return answer
-
 
     except Exception as e:
         print(f"Error: {e}")
