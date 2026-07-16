@@ -381,10 +381,10 @@ import os
 # إعداد الكلاينت الجديد
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# دالة الاستدعاء المحدثة
 def get_ai_answer(user_id, user_question):
-    # المكتبة الجديدة تستخدم chats للذاكرة
+    global user_histories
     if user_id not in user_histories:
+        # تعريف الشات بشكل صحيح في المكتبة الجديدة
         user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
     
     chat = user_histories[user_id]
@@ -392,11 +392,15 @@ def get_ai_answer(user_id, user_question):
     try:
         response = chat.send_message(user_question)
         answer = response.text
-        # ... بقية كود القص (200 حرف) كما هو
+        # بقية كود القص (200 حرف)
+        if len(answer) > 200:
+            answer = answer[:200] + "..."
     except Exception as e:
         print(f"Error: {e}")
         answer = "ياخي الـ API معلق، اصبر علي شوي."
+        
     return answer
+
 
 
 
