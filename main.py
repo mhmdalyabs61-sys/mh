@@ -375,16 +375,23 @@ async def on_webhooks_update(channel):
 
 
 
+
 from google import genai
 import os
 
-# إعداد الكلاينت الجديد
+# إعداد العميل للمكتبة الجديدة
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
+# إعدادات البوت والـ Intents
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ذاكرة المحادثات
+user_histories = {}
+
 def get_ai_answer(user_id, user_question):
-    global user_histories
     if user_id not in user_histories:
-        # تعريف الشات بشكل صحيح في المكتبة الجديدة
         user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
     
     chat = user_histories[user_id]
@@ -392,43 +399,28 @@ def get_ai_answer(user_id, user_question):
     try:
         response = chat.send_message(user_question)
         answer = response.text
-        # بقية كود القص (200 حرف)
         if len(answer) > 200:
             answer = answer[:200] + "..."
+        return answer
     except Exception as e:
         print(f"Error: {e}")
-        answer = "ياخي الـ API معلق، اصبر علي شوي."
-        
-    return answer
-
-
-
+        return "ياخي الـ API معلق، اصبر علي شوي."
 
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    should_reply = False
-    
+    # التحقق من المنشن
     if bot.user.mentioned_in(message):
-        should_reply = True
-        
-    if message.reference and message.reference.resolved:
-        if message.reference.resolved.author == bot.user:
-            should_reply = True
-
-    if should_reply:
         user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
         
-        if user_question:
-            async with message.channel.typing():
-                answer = get_ai_answer(message.author.id, user_question)
-                await message.reply(answer)
-        else:
-            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
+        # استدعاء دالة الذكاء الاصطناعي
+        answer = get_ai_answer(str(message.author.id), user_question)
+        
+        # إرسال الرد
+        await message.channel.send(answer)
 
-    await bot.process_commands(message)
 
 
 
