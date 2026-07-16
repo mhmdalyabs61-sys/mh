@@ -376,6 +376,8 @@ async def on_webhooks_update(channel):
 
 
 
+import discord
+from discord.ext import commands
 from google import genai
 import os
 
@@ -391,10 +393,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 user_histories = {}
 
 def get_ai_answer(user_id, user_question):
+    # تصحيح التنسيق هنا
     if user_id not in user_histories:
-# بدل السطر القديم بهذا السطر بالضبط:
-user_histories[user_id] = client.chats.create(model="gemini-1.5-flash-002")
-
+        user_histories[user_id] = client.chats.create(model="gemini-1.5-flash-002")
     
     chat = user_histories[user_id]
     
