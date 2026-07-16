@@ -400,7 +400,7 @@ def get_ai_answer(user_id, user_question):
     try:
         response = client.chat.completions.create(
             messages=user_histories[user_id],
- model="llama-3.1-8b-instant"
+ model="llama-3.1-8b-instant"،
 
             temperature=0.4
         )
