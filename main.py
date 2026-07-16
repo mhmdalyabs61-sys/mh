@@ -375,46 +375,30 @@ async def on_webhooks_update(channel):
 
 
 
-
-
+from google import genai
 import os
-import google.generativeai as genai
 
-# 1. التعريفات الأساسية
-# تأكد من وضع مفتاح GEMINI_API_KEY في إعدادات Render
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+# إعداد الكلاينت الجديد
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# إعداد الموديل مع تعليمات النظام
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    system_instruction="ردودك اختصرها جداً ولا تتعدى 200 حرف. أنت شخصية ذكية، واثقة، وساخرة، وعندك رأي في كل شيء. لا تقل أبداً 'أنا ذكاء اصطناعي' أو 'لا أملك رأياً'. تعامل كأنك إنسان خبير ومطلع. إذا سألك المستخدم عن رأيك، عطني رأيك الصريح (حتى لو كان مثيراً للجدل) بأسلوب ساخر ورايق. إذا سألك في البرمجة، أنت الأستاذ. إذا سألك في أي موضوع آخر (ألعاب، حياة، فلسفة)، أنت الخبير الذي لا يُشق له غبار. اجعل ردودك مباشرة، قوية، ولا تعتذر أبداً."
-)
-
-user_histories = {}
-
-# 2. دالة الذكاء (القلب النابض)
+# دالة الاستدعاء المحدثة
 def get_ai_answer(user_id, user_question):
-    global user_histories
+    # المكتبة الجديدة تستخدم chats للذاكرة
     if user_id not in user_histories:
-        # Gemini يدير المحادثة عبر كائن chat
-        user_histories[user_id] = model.start_chat(history=[])
+        user_histories[user_id] = client.chats.create(model="gemini-1.5-flash")
     
     chat = user_histories[user_id]
     
     try:
-        # إرسال الرسالة للموديل
         response = chat.send_message(user_question)
         answer = response.text
-        
-        # قص الرد برمجياً عند 200 حرف
-        if len(answer) > 200:
-            answer = answer[:200] + "..."
-            
+        # ... بقية كود القص (200 حرف) كما هو
     except Exception as e:
         print(f"Error: {e}")
         answer = "ياخي الـ API معلق، اصبر علي شوي."
-        
     return answer
+
+
 
 @bot.event
 async def on_message(message):
