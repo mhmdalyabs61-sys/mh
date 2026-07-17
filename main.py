@@ -10,7 +10,7 @@ import discord
 from discord.ext import commands
 import discord
 from discord.ext import commands
-
+‏import google.generativeai as genai
 # هذه أهم خطوة: تفعيل الـ intents
 intents = discord.Intents.default()
 intents.message_content = True  # هذا الخيار هو المسؤول عن قراءة النص
@@ -393,8 +393,8 @@ async def on_message(message):
     print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
     
     
-‏import os
-‏import google.generativeai as genai
+
+
 
 # 1. إعدادات البوت والـ Intents
 ‏intents = discord.Intents.default()
