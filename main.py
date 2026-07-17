@@ -8,6 +8,16 @@ from flask import Flask
 from threading import Thread
 import discord
 from discord.ext import commands
+import discord
+from discord.ext import commands
+
+# هذه أهم خطوة: تفعيل الـ intents
+intents = discord.Intents.default()
+intents.message_content = True  # هذا الخيار هو المسؤول عن قراءة النص
+intents.messages = True         # هذا لقراءة الرسائل
+
+# تعريف البوت مع تمرير الـ intents
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 
 
