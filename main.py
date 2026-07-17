@@ -8,9 +8,7 @@ from flask import Flask
 from threading import Thread
 import discord
 from discord.ext import commands
-import discord
-from discord.ext import commands
-‏import google.generativeai as genai
+import google.generativeai as genai
 # هذه أهم خطوة: تفعيل الـ intents
 intents = discord.Intents.default()
 intents.message_content = True  # هذا الخيار هو المسؤول عن قراءة النص
