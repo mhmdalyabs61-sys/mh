@@ -392,8 +392,8 @@ async def on_message(message):
     # [اختبار التشخيص]
     print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
     
-    # ... باقي كودك
-‏import os
+    
+‏
 
 ‏import google.generativeai as genai
 
