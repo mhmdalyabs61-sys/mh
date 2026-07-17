@@ -421,29 +421,29 @@ def get_ai_answer(user_id, user_question):
 
 @bot.event
 async def on_message(message):
+    # لا ترد على نفسك
     if message.author == bot.user:
         return
 
-    # منطق التشغيل: منشن أو رد (Reply)
-    should_reply = bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user)
+    # تحقق هل تم منشن البوت أو الرد على رسالة للبوت
+    is_mentioned = bot.user.mentioned_in(message)
+    is_reply = message.reference and message.reference.resolved and message.reference.resolved.author == bot.user
 
-    if should_reply:
-        # استخراج النص بطريقة أفضل: إزالة المنشنات فقط
-        # نستخدم message.clean_content ليقوم الديسكورد بإزالة المنشنات تلقائياً
-        user_question = message.clean_content.replace(f'@{bot.user.name}', '').strip()
-        
-        # إذا كان النص لا يزال فارغاً، نحاول إزالة المنشن بالـ ID كاحتياط
-        if not user_question:
-            user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+    if is_mentioned or is_reply:
+        # استخراج النص وحذف المينشن (نستخدم content الخام وليس clean_content)
+        # هذا السطر يحذف المينشن بأي شكل (سواء كان <@ID> أو <@!ID>)
+        content = message.content.replace(f'<@{bot.user.id}>', '').replace(f'<@!{bot.user.id}>', '').strip()
 
-        if user_question:
+        if content:
             async with message.channel.typing():
-                answer = get_ai_answer(message.author.id, user_question)
+                answer = get_ai_answer(message.author.id, content)
                 await message.reply(answer)
         else:
-            await message.reply("ياخي وش تبي؟ كتبت منشن ولا قلت شي!")
+            # إذا كان المنشن بدون نص
+            await message.reply("أنا هنا، وش تبي؟")
 
     await bot.process_commands(message)
+
 
 
 
