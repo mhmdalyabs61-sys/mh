@@ -393,79 +393,71 @@ async def on_message(message):
     print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
     
     # ... باقي كودك
+‏import os
 
+‏import google.generativeai as genai
 
+# 1. إعدادات البوت والـ Intents
+‏intents = discord.Intents.default()
+‏intents.message_content = True
+‏bot = commands.Bot(command_prefix="!", intents=intents)
 
-import os
-from groq import Groq
+# 2. إعداد Gemini
+‏genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+‏model = genai.GenerativeModel(
+‏    model_name="gemini-1.5-flash",
+‏    system_instruction="أنت شخصية ذكية، واثقة، وساخرة. لا تقل أبداً 'أنا ذكاء اصطناعي'. تعامل كإنسان خبير. اجعل ردودك مباشرة، قوية، ولا تتعدى 200 حرف."
+)
 
-# 1. التعريفات الأساسية (العمود الفقري للكود)
-# يتأكد أنك مستخدم المتغيرات اللي عرفتها في Render
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-user_histories = {}
+# 3. إدارة الذاكرة (لكل مستخدم)
+‏user_chats = {}
 
-# 2. دالة الذكاء (القلب النابض)
-def get_ai_answer(user_id, user_question):
-    global user_histories
-    if user_id not in user_histories:
-        user_histories[user_id] = [
-            {"role": "system", "content": " وردودك نختصره جدا لا تتعدى 200 حرف أنت شخصية ذكية، واثقة، وساخرة، وعندك رأي في كل شيء. لا تقل أبداً 'أنا ذكاء اصطناعي' أو 'لا أملك رأياً'. تعامل كأنك إنسان خبير ومطلع. إذا سألك المستخدم عن رأيك، عطني رأيك الصريح (حتى لو كان مثيراً للجدل) بأسلوب ساخر ورايق. إذا سألك في البرمجة، أنت الأستاذ. إذا سألك في أي موضوع آخر (ألعاب، حياة، فلسفة)، أنت الخبير الذي لا يُشق له غبار. اجعل ردودك مباشرة، قوية، ولا تعتذر أبداً."}
-        ]
+‏def get_ai_answer(user_id, user_question):
+‏    if user_id not in user_chats:
+        # نبدأ محادثة جديدة لهذا المستخدم
+‏        user_chats[user_id] = model.start_chat(history=[])
     
-    user_histories[user_id].append({"role": "user", "content": user_question})
+‏    chat = user_chats[user_id]
     
-    try:
-        response = client.chat.completions.create(
-            messages=user_histories[user_id],
- model="llama-3.1-8b-instant",
+‏    try:
+‏        response = chat.send_message(user_question)
+‏        answer = response.text
+‏    except Exception as e:
+‏        print(f"Error: {e}")
+‏        answer = "ياخي الـ API معلق، اصبر علي شوي."
 
-            temperature=0.4
-        )
-        answer = response.choices[0].message.content
-        user_histories[user_id].append({"role": "assistant", "content": answer})
-    except Exception as e:
-        print(f"Error: {e}")
-        answer = "ياخي الـ API معلق، اصبر علي شوي."
-
-      
-        # قص الرد برمجياً عند 200 حرف
-        if len(answer) > 200:
-            answer = answer[:200] + "..."
+    # قص الرد إذا كان طويلاً
+‏    if len(answer) > 200:
+‏        answer = answer[:200] + "..."
     
-    if len(user_histories[user_id]) > 4:
-        user_histories[user_id].pop(1)
+‏    return answer
+
+‏@bot.event
+‏async def on_message(message):
+‏    if message.author == bot.user:
+‏        return
+
+    # منطق المنشن أو الرد (Reply)
+‏    should_reply = False
+‏    if bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user):
+‏        should_reply = True
+
+‏    if should_reply:
+        # تنظيف الرسالة من المنشن
+‏        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
         
-    return answer
+‏        if user_question:
+‏            answer = get_ai_answer(message.author.id, user_question)
+‏            await message.reply(answer)
+‏        else:
+‏            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
 
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
+‏    await bot.process_commands(message)
 
-    # منطق التشغيل: إذا منشنته أو سويت reply لرسالته
-    should_reply = False
-    
-    # 1. حالة المنشن
-    if bot.user.mentioned_in(message):
-        should_reply = True
-        
-    # 2. حالة الرد على رسالة (Reply)
-    if message.reference and message.reference.resolved:
-        if message.reference.resolved.author == bot.user:
-            should_reply = True
 
-    if should_reply:
-        # تنظيف السؤال من المنشنات
-        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
-        
-        if user_question:
-            # تم حذف السطر الذي يسبب الخطأ
-            answer = get_ai_answer(message.author.id, user_question)
-            await message.reply(answer)
-        else:
-            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
 
-    await bot.process_commands(message)
+
+
 
 
 
