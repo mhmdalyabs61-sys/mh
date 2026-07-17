@@ -417,23 +417,32 @@ def get_ai_answer(user_id, user_question):
         
     return answer
 
-# دالة المنشن والرد
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    if bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user):
-        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+    # منطق التشغيل: منشن أو رد (Reply)
+    should_reply = bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user)
+
+    if should_reply:
+        # استخراج النص بطريقة أفضل: إزالة المنشنات فقط
+        # نستخدم message.clean_content ليقوم الديسكورد بإزالة المنشنات تلقائياً
+        user_question = message.clean_content.replace(f'@{bot.user.name}', '').strip()
         
+        # إذا كان النص لا يزال فارغاً، نحاول إزالة المنشن بالـ ID كاحتياط
+        if not user_question:
+            user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+
         if user_question:
             async with message.channel.typing():
                 answer = get_ai_answer(message.author.id, user_question)
                 await message.reply(answer)
         else:
-            await message.reply("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
+            await message.reply("ياخي وش تبي؟ كتبت منشن ولا قلت شي!")
 
     await bot.process_commands(message)
+
 
 
 
