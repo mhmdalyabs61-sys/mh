@@ -459,10 +459,9 @@ async def on_message(message):
         user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
         
         if user_question:
-            async with message.channel.typing():
-                answer = get_ai_answer(message.author.id, user_question)
-                # استخدام reply عشان يظهر أن البوت يرد على رسالتك تحديداً
-                await message.reply(answer)
+            # تم حذف السطر الذي يسبب الخطأ
+            answer = get_ai_answer(message.author.id, user_question)
+            await message.reply(answer)
         else:
             await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
 
