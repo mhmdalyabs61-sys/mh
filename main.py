@@ -393,8 +393,7 @@ async def on_message(message):
     print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
     
     
-‏
-
+‏import os
 ‏import google.generativeai as genai
 
 # 1. إعدادات البوت والـ Intents
