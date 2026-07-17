@@ -378,23 +378,19 @@ async def on_webhooks_update(channel):
 
 
 import os
-import discord
-from discord.ext import commands
 from groq import Groq
-import time
-time.sleep(5)
 
-# إعدادات البوت والـ API
-bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
+# 1. التعريفات الأساسية (العمود الفقري للكود)
+# يتأكد أنك مستخدم المتغيرات اللي عرفتها في Render
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 user_histories = {}
 
-# دالة الذكاء
+# 2. دالة الذكاء (القلب النابض)
 def get_ai_answer(user_id, user_question):
     global user_histories
     if user_id not in user_histories:
         user_histories[user_id] = [
-            {"role": "system", "content": "ردودك نختصره جدا لا تتعدى 200 حرف أنت شخصية ذكية، واثقة، وساخرة، وعندك رأي في كل شيء. لا تقل أبداً 'أنا ذكاء اصطناعي' أو 'لا أملك رأياً'. تعامل كأنك إنسان خبير ومطلع. إذا سألك المستخدم عن رأيك، عطني رأيك الصريح (حتى لو كان مثيراً للجدل) بأسلوب ساخر ورايق. إذا سألك في البرمجة، أنت الأستاذ. إذا سألك في أي موضوع آخر (ألعاب، حياة، فلسفة)، أنت الخبير الذي لا يُشق له غبار. اجعل ردودك مباشرة، قوية، ولا تعتذر أبداً."}
+            {"role": "system", "content": " وردودك نختصره جدا لا تتعدى 200 حرف أنت شخصية ذكية، واثقة، وساخرة، وعندك رأي في كل شيء. لا تقل أبداً 'أنا ذكاء اصطناعي' أو 'لا أملك رأياً'. تعامل كأنك إنسان خبير ومطلع. إذا سألك المستخدم عن رأيك، عطني رأيك الصريح (حتى لو كان مثيراً للجدل) بأسلوب ساخر ورايق. إذا سألك في البرمجة، أنت الأستاذ. إذا سألك في أي موضوع آخر (ألعاب، حياة، فلسفة)، أنت الخبير الذي لا يُشق له غبار. اجعل ردودك مباشرة، قوية، ولا تعتذر أبداً."}
         ]
     
     user_histories[user_id].append({"role": "user", "content": user_question})
@@ -402,7 +398,8 @@ def get_ai_answer(user_id, user_question):
     try:
         response = client.chat.completions.create(
             messages=user_histories[user_id],
-            model="llama-3.1-8b-instant",
+ model="llama-3.1-8b-instant",
+
             temperature=0.4
         )
         answer = response.choices[0].message.content
@@ -410,9 +407,11 @@ def get_ai_answer(user_id, user_question):
     except Exception as e:
         print(f"Error: {e}")
         answer = "ياخي الـ API معلق، اصبر علي شوي."
-    
-    if len(answer) > 200:
-        answer = answer[:200] + "..."
+
+      
+        # قص الرد برمجياً عند 200 حرف
+        if len(answer) > 200:
+            answer = answer[:200] + "..."
     
     if len(user_histories[user_id]) > 4:
         user_histories[user_id].pop(1)
@@ -421,33 +420,32 @@ def get_ai_answer(user_id, user_question):
 
 @bot.event
 async def on_message(message):
-    # لا ترد على نفسك
     if message.author == bot.user:
         return
 
-    # التأكد من أن البوت تم عمل منشن له
+    # منطق التشغيل: إذا منشنته أو سويت reply لرسالته
+    should_reply = False
+    
+    # 1. حالة المنشن
     if bot.user.mentioned_in(message):
-        # هنا نأخذ النص، ونستبدل أي منشن للبوت بفراغ
-        raw_text = message.content
-        mention_text = f"<@{bot.user.id}>"
-        mention_text_nick = f"<@!{bot.user.id}>"
+        should_reply = True
         
-        # تنظيف النص من المينشن
-        user_input = raw_text.replace(mention_text, "").replace(mention_text_nick, "").strip()
-        
-        # إذا كان النص فارغاً بعد التنظيف
-        if not user_input:
-            await message.reply("أنا هنا، وش سؤالك؟")
-            return
+    # 2. حالة الرد على رسالة (Reply)
+    if message.reference and message.reference.resolved:
+        if message.reference.resolved.author == bot.user:
+            should_reply = True
 
-        # إذا كان هناك نص، أرسله للـ AI
-        async with message.channel.typing():
-            try:
-                # تأكد أن دالة get_ai_answer تستقبل النص هنا
-                answer = get_ai_answer(message.author.id, user_input)
+    if should_reply:
+        # تنظيف السؤال من المنشنات
+        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+        
+        if user_question:
+            async with message.channel.typing():
+                answer = get_ai_answer(message.author.id, user_question)
+                # استخدام reply عشان يظهر أن البوت يرد على رسالتك تحديداً
                 await message.reply(answer)
-            except Exception as e:
-                await message.reply(f"عذراً، حصل خطأ: {e}")
+        else:
+            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
 
     await bot.process_commands(message)
 
