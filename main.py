@@ -425,24 +425,32 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # تحقق هل تم منشن البوت أو الرد على رسالة للبوت
-    is_mentioned = bot.user.mentioned_in(message)
-    is_reply = message.reference and message.reference.resolved and message.reference.resolved.author == bot.user
+    # التأكد من أن البوت تم عمل منشن له
+    if bot.user.mentioned_in(message):
+        # هنا نأخذ النص، ونستبدل أي منشن للبوت بفراغ
+        raw_text = message.content
+        mention_text = f"<@{bot.user.id}>"
+        mention_text_nick = f"<@!{bot.user.id}>"
+        
+        # تنظيف النص من المينشن
+        user_input = raw_text.replace(mention_text, "").replace(mention_text_nick, "").strip()
+        
+        # إذا كان النص فارغاً بعد التنظيف
+        if not user_input:
+            await message.reply("أنا هنا، وش سؤالك؟")
+            return
 
-    if is_mentioned or is_reply:
-        # استخراج النص وحذف المينشن (نستخدم content الخام وليس clean_content)
-        # هذا السطر يحذف المينشن بأي شكل (سواء كان <@ID> أو <@!ID>)
-        content = message.content.replace(f'<@{bot.user.id}>', '').replace(f'<@!{bot.user.id}>', '').strip()
-
-        if content:
-            async with message.channel.typing():
-                answer = get_ai_answer(message.author.id, content)
+        # إذا كان هناك نص، أرسله للـ AI
+        async with message.channel.typing():
+            try:
+                # تأكد أن دالة get_ai_answer تستقبل النص هنا
+                answer = get_ai_answer(message.author.id, user_input)
                 await message.reply(answer)
-        else:
-            # إذا كان المنشن بدون نص
-            await message.reply("أنا هنا، وش تبي؟")
+            except Exception as e:
+                await message.reply(f"عذراً، حصل خطأ: {e}")
 
     await bot.process_commands(message)
+
 
 
 
