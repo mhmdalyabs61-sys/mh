@@ -381,6 +381,8 @@ import os
 import discord
 from discord.ext import commands
 from groq import Groq
+import time
+time.sleep(5)
 
 # إعدادات البوت والـ API
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
