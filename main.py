@@ -384,6 +384,15 @@ async def on_webhooks_update(channel):
         break
 
 
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+    
+    # [اختبار التشخيص]
+    print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
+    
+    # ... باقي كودك
 
 
 
