@@ -395,9 +395,9 @@ async def on_message(message):
 
 
 # 1. إعدادات البوت والـ Intents
-‏intents = discord.Intents.default()
-‏intents.message_content = True
-‏bot = commands.Bot(command_prefix="!", intents=intents)
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # 2. إعداد Gemini
 ‏genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
