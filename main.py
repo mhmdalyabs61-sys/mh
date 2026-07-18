@@ -401,8 +401,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # 2. إعداد Gemini
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-‏model = genai.GenerativeModel(
-‏    model_name="gemini-1.5-flash",
+model = genai.GenerativeModel(
+    model_name="gemini-1.5-flash",
+)
+
 ‏    system_instruction="أنت شخصية ذكية، واثقة، وساخرة. لا تقل أبداً 'أنا ذكاء اصطناعي'. تعامل كإنسان خبير. اجعل ردودك مباشرة، قوية، ولا تتعدى 200 حرف."
 )
 
