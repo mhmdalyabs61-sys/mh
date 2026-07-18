@@ -8,7 +8,7 @@ from flask import Flask
 from threading import Thread
 import discord
 from discord.ext import commands
-import google.generativeai as genai
+
 # هذه أهم خطوة: تفعيل الـ intents
 intents = discord.Intents.default()
 intents.message_content = True  # هذا الخيار هو المسؤول عن قراءة النص
@@ -391,61 +391,42 @@ async def on_message(message):
     print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
     
     
-# 1. إعدادات البوت والـ Intents
+import discord
+from discord.ext import commands
+import os
+import google.generativeai as genai
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 2. إعداد Gemini (تم وضع الـ system_instruction داخل التعريف)
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
     system_instruction="أنت شخصية ذكية، واثقة، وساخرة. لا تقل أبداً 'أنا ذكاء اصطناعي'. تعامل كإنسان خبير. اجعل ردودك مباشرة، قوية، ولا تتعدى 200 حرف."
 )
 
-# 3. إدارة الذاكرة (لكل مستخدم)
 user_chats = {}
 
 def get_ai_answer(user_id, user_question):
     if user_id not in user_chats:
         user_chats[user_id] = model.start_chat(history=[])
-    
-    chat = user_chats[user_id]
-    
     try:
-        response = chat.send_message(user_question)
-        answer = response.text
-    except Exception as e:
-        print(f"DEBUG ERROR: {e}") 
-        answer = f"خطأ في الاتصال: {str(e)[:50]}"
-
-    # قص الرد إذا كان طويلاً
-    if len(answer) > 200:
-        answer = answer[:200] + "..."
-    
-    return answer
+        response = user_chats[user_id].send_message(user_question)
+        return response.text[:200]
+    except Exception:
+        return "الـ API معلق حالياً."
 
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
-
-    # منطق المنشن أو الرد (Reply)
-    should_reply = False
     if bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user):
-        should_reply = True
-
-    if should_reply:
-        # تنظيف الرسالة من المنشن
-        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
-        
-        if user_question:
-            answer = get_ai_answer(message.author.id, user_question)
-            await message.reply(answer)
-        else:
-            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
-
+        clean_content = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+        if clean_content:
+            await message.reply(get_ai_answer(message.author.id, clean_content))
     await bot.process_commands(message)
+
 
 
 
