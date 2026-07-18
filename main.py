@@ -391,9 +391,6 @@ async def on_message(message):
     print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
     
     
-
-
-
 # 1. إعدادات البوت والـ Intents
 intents = discord.Intents.default()
 intents.message_content = True
@@ -452,6 +449,9 @@ model = genai.GenerativeModel(
 ‏            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
 
 ‏    await bot.process_commands(message)
+
+
+
 
 
 
