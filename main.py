@@ -416,8 +416,8 @@ def get_ai_answer(user_id, user_question):
         response = chat.send_message(user_question)
         answer = response.text
     except Exception as e:
-        print(f"Error: {e}")
-        answer = "ياخي الـ API معلق، اصبر علي شوي."
+        print(f"DEBUG ERROR: {e}") 
+        answer = f"خطأ في الاتصال: {str(e)[:50]}"
 
     # قص الرد إذا كان طويلاً
     if len(answer) > 200:
