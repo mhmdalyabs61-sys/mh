@@ -396,59 +396,57 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 2. إعداد Gemini
+# 2. إعداد Gemini (تم وضع الـ system_instruction داخل التعريف)
 genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
+    system_instruction="أنت شخصية ذكية، واثقة، وساخرة. لا تقل أبداً 'أنا ذكاء اصطناعي'. تعامل كإنسان خبير. اجعل ردودك مباشرة، قوية، ولا تتعدى 200 حرف."
 )
 
-system_instruction="أنت شخصية ذكية، واثقة، وساخرة. لا تقل أبداً 'أنا ذكاء اصطناعي'. تعامل كإنسان خبير. اجعل ردودك مباشرة، قوية، ولا تتعدى 200 حرف."
-
-
 # 3. إدارة الذاكرة (لكل مستخدم)
-‏user_chats = {}
+user_chats = {}
 
-‏def get_ai_answer(user_id, user_question):
-‏    if user_id not in user_chats:
-        # نبدأ محادثة جديدة لهذا المستخدم
-‏        user_chats[user_id] = model.start_chat(history=[])
+def get_ai_answer(user_id, user_question):
+    if user_id not in user_chats:
+        user_chats[user_id] = model.start_chat(history=[])
     
-‏    chat = user_chats[user_id]
+    chat = user_chats[user_id]
     
-‏    try:
-‏        response = chat.send_message(user_question)
-‏        answer = response.text
-‏    except Exception as e:
-‏        print(f"Error: {e}")
-‏        answer = "ياخي الـ API معلق، اصبر علي شوي."
+    try:
+        response = chat.send_message(user_question)
+        answer = response.text
+    except Exception as e:
+        print(f"Error: {e}")
+        answer = "ياخي الـ API معلق، اصبر علي شوي."
 
     # قص الرد إذا كان طويلاً
-‏    if len(answer) > 200:
-‏        answer = answer[:200] + "..."
+    if len(answer) > 200:
+        answer = answer[:200] + "..."
     
-‏    return answer
+    return answer
 
-‏@bot.event
-‏async def on_message(message):
-‏    if message.author == bot.user:
-‏        return
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
 
     # منطق المنشن أو الرد (Reply)
-‏    should_reply = False
-‏    if bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user):
-‏        should_reply = True
+    should_reply = False
+    if bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user):
+        should_reply = True
 
-‏    if should_reply:
+    if should_reply:
         # تنظيف الرسالة من المنشن
-‏        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
+        user_question = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
         
-‏        if user_question:
-‏            answer = get_ai_answer(message.author.id, user_question)
-‏            await message.reply(answer)
-‏        else:
-‏            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
+        if user_question:
+            answer = get_ai_answer(message.author.id, user_question)
+            await message.reply(answer)
+        else:
+            await message.channel.send("أنت رديت علي بس ما كتبت شي.. وش تبي؟")
 
-‏    await bot.process_commands(message)
+    await bot.process_commands(message)
+
 
 
 
