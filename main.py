@@ -387,45 +387,9 @@ async def on_message(message):
     if message.author == bot.user:
         return
     
-    # [اختبار التشخيص]
-    print(f"DEBUG: وصلت رسالة من {message.author}: {message.content}") 
+   
     
-    
-import discord
-from discord.ext import commands
-import os
-import google.generativeai as genai
 
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    system_instruction="أنت شخصية ذكية، واثقة، وساخرة. لا تقل أبداً 'أنا ذكاء اصطناعي'. تعامل كإنسان خبير. اجعل ردودك مباشرة، قوية، ولا تتعدى 200 حرف."
-)
-
-user_chats = {}
-
-def get_ai_answer(user_id, user_question):
-    if user_id not in user_chats:
-        user_chats[user_id] = model.start_chat(history=[])
-    try:
-        response = user_chats[user_id].send_message(user_question)
-        return response.text[:200]
-    except Exception:
-        return "الـ API معلق حالياً."
-
-@bot.event
-async def on_message(message):
-    if message.author == bot.user:
-        return
-    if bot.user.mentioned_in(message) or (message.reference and message.reference.resolved and message.reference.resolved.author == bot.user):
-        clean_content = message.content.replace(f'<@!{bot.user.id}>', '').replace(f'<@{bot.user.id}>', '').strip()
-        if clean_content:
-            await message.reply(get_ai_answer(message.author.id, clean_content))
-    await bot.process_commands(message)
 
 
 
