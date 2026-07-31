@@ -353,6 +353,23 @@ async def fast_restore(channel):
         print(f"Error restoring channel: {e}")
     finally:
         active_restorations.discard(channel.guild.id)
+# --- حماية إنشاء القنوات ---
+@bot.event
+async def on_guild_channel_create(channel):
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        # إذا كان الفاعل هو البوت أو في القائمة البيضاء -> تجاهل
+        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []):
+            return
+        
+        # إجراء الحماية: حذف الروم المُنشأ فوراً + تبنيد المعتدي + إرسال اللوق
+        try:
+            await channel.delete(reason="Anti-Nuke: Unauthorized Channel Creation")
+            await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Creation")
+        except:
+            pass
+        
+        asyncio.create_task(handle_protection(channel.guild, entry.user, "إنشاء رومات", channel.name))
+        break
 
 
 @bot.event
