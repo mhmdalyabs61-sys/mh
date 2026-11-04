@@ -6,88 +6,16 @@ from datetime import timedelta, datetime
 from typing import Union, Optional, List, Dict
 from flask import Flask
 from threading import Thread
-import discord
-from discord.ext import commands
 
-# هذه أهم خطوة: تفعيل الـ intents
-intents = discord.Intents.default()
-intents.message_content = True  # هذا الخيار هو المسؤول عن قراءة النص
-intents.messages = True         # هذا لقراءة الرسائل
+# تفعيل الـ intents
+intents = discord.Intents.all()
 
-# تعريف البوت مع تمرير الـ intents
-bot = commands.Bot(command_prefix="!", intents=intents)
+# تعريف البوت
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-
-
-
-
-
-
-
-
-
-
-
-
-# --- تعريف البيانات الأساسية (لازم تكون فوق أي دالة) ---
+# --- تعريف البيانات الأساسية ---
 server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
 whitelist = set()
-
-# تأكد أن bot_data يحتوي على كل المفاتيح المطلوبة
-bot_data = {
-    'whitelisted': [], 
-    'log_channels': {},  # هذا هو اللي مسبب الـ KeyError
-    'protection': {
-        'channel_del': True, 
-        'channel_create': True, 
-        'role_del': True, 
-        'role_create': True, 
-        'webhook': True
-    }
-}
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "I am alive!"
-
-def run():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-
-def keep_alive():
-    t = Thread(target=run, daemon=True)
-    t.start()
-
-keep_alive()
-
-# --- تعريفات الحماية الأساسية (مهمة جداً) ---
-event_history = {}
-
-async def queue_task(target_id, coro):
-    try:
-        await coro
-    except discord.HTTPException as e:
-        if e.status == 429:
-            await asyncio.sleep(e.retry_after)
-            await coro
-    finally:
-        await asyncio.sleep(5)
-        event_history.pop(target_id, None)
-
-async def instant_ban(guild, user, reason):
-    if user.id == guild.owner_id or user.id == bot.user.id or is_whitelisted(user.id): return
-    try:
-        await guild.ban(user, reason=reason)
-    except: pass
-
-# ══════════════════════════════════════════════════════════════
-#                   ضع التوكن هنا ↓
-# ══════════════════════════════════════════════════════════════
-import os
-TOKEN = os.getenv('TOKEN')
-
-# ══════════════════════════════════════════════════════════════
 
 DATA_FILE = 'bot_data.json'
 processing_events = set()
@@ -99,7 +27,8 @@ def load_data():
         'protection': {
             'channel_del': True, 'channel_update': True,
             'role_del': True, 'role_create': True,
-            'webhook': True, 'bot_add': True
+            'webhook': True, 'bot_add': True,
+            'channel_create': True
         }
     }
     if os.path.exists(DATA_FILE):
@@ -117,11 +46,82 @@ def save_data(data):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 bot_data = load_data()
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='!', intents=intents)
 
-# --- أنظمة الراديو (UI Components) ---
+# Flask لابقاء البوت يعمل
+app = Flask('')
 
+@app.route('/')
+def home():
+    return "I am alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+def keep_alive():
+    t = Thread(target=run, daemon=True)
+    t.start()
+
+keep_alive()
+
+# --- تعريفات الحماية الأساسية والدوال المساعدة ---
+event_history = {}
+protected_channels = set()
+active_restorations = set()
+
+async def ban_user(guild, user, reason):
+    if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []): return
+    try:
+        await guild.ban(user, reason=reason)
+        await send_log(guild, f"🔨 **تم تبنيد** {user.mention} | السبب: {reason}")
+    except: pass
+
+async def ensure_log_channel(guild: discord.Guild):
+    gid = str(guild.id)
+    log_id = bot_data['log_channels'].get(gid)
+    if log_id:
+        channel = guild.get_channel(int(log_id))
+        if channel: return channel
+    channel = discord.utils.get(guild.text_channels, name="protection-logs")
+    if not channel:
+        try:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
+            }
+            channel = await guild.create_text_channel("protection-logs", overwrites=overwrites)
+        except: return None
+    bot_data['log_channels'][gid] = channel.id
+    save_data(bot_data)
+    return channel
+
+async def send_log(guild: discord.Guild, message: str):
+    channel = await ensure_log_channel(guild)
+    if channel:
+        try: await channel.send(f"`[{datetime.now().strftime('%H:%M:%S')}]` {message}")
+        except: pass
+
+async def handle_protection(guild, user, action_name, target, action_type="", details=""):
+    log_id = bot_data.get('log_channels', {}).get(str(guild.id))
+    channel = guild.get_channel(log_id)
+    
+    if channel:
+        embed = discord.Embed(title="🛡️ Security System Alert", color=discord.Color.red())
+        embed.add_field(name="👤 الشخص", value=f"{user.mention} (`{user.id}`)", inline=True)
+        embed.add_field(name="⚡ الإجراء", value=f"`{action_name}`", inline=True)
+        embed.add_field(name="🎯 الهدف", value=f"**{target}**", inline=False)
+        if action_type:
+            embed.add_field(name="⚙️ ما تم تنفيذه", value=f"**{action_type}**", inline=False)
+        if details:
+            embed.add_field(name="📝 تفاصيل الاسترجاع", value=details, inline=False)
+        embed.set_footer(text=f"Server: {guild.name}")
+        try: await channel.send(embed=embed)
+        except: pass
+
+    if user.id != bot.user.id and user.id not in bot_data.get('whitelisted', []):
+        try: await guild.ban(user, reason=f"Anti-Nuke: {action_name}")
+        except: pass
+
+# --- واجهات الراديو (UI Components) ---
 class WaveModal(discord.ui.Modal, title='إنشاء/دخول موجة'):
     wave_id = discord.ui.TextInput(label='رقم الموجة', placeholder='مثال: 71.17', min_length=1, max_length=10)
 
@@ -152,15 +152,11 @@ class RadioView(discord.ui.View):
     async def join_wave(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(WaveModal())
 
-# --- تهيئة البوت (Setup Hook) ---
-
 @bot.event
 async def setup_hook():
     bot.add_view(RadioView()) 
     await bot.tree.sync()
     print("✅ تم تفعيل نظام الراديو ومزامنة الأوامر!")
-
-# --- الدوال المساعدة (Helpers) ---
 
 async def check_hierarchy(interaction: discord.Interaction) -> bool:
     if interaction.user.id == interaction.guild.owner_id: return True
@@ -174,127 +170,50 @@ async def check_hierarchy(interaction: discord.Interaction) -> bool:
         return False
     except: return True
 
-async def ensure_log_channel(guild: discord.Guild):
-    gid = str(guild.id)
-    log_id = bot_data['log_channels'].get(gid)
-    if log_id:
-        channel = guild.get_channel(int(log_id))
-        if channel: return channel
-    channel = discord.utils.get(guild.text_channels, name="protection-logs")
-    if not channel:
-        try:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True)
-            }
-            channel = await guild.create_text_channel("protection-logs", overwrites=overwrites)
-        except: return None
-    bot_data['log_channels'][gid] = channel.id
-    save_data(bot_data)
-    return channel
-
-async def send_log(guild: discord.Guild, message: str):
-    channel = await ensure_log_channel(guild)
-    if channel:
-        try: await channel.send(f"`[{datetime.now().strftime('%H:%M:%S')}]` {message}")
-        except: pass
-
-async def ban_user(guild, user, reason):
-    if user.id == bot.user.id or user.id in bot_data['whitelisted']: return
-  
-    try:
-        await guild.ban(user, reason=reason)
-        await send_log(guild, f"🔨 **تم تبنيد** {user.mention} | السبب: {reason}")
-    except: pass
-
-
-# --- دالة اللوق الاحترافية (Embed منظمة) ---
-async def handle_protection(guild, user, action_name, target, action_type, details=""):
-    log_id = bot_data.get('log_channels', {}).get(str(guild.id))
-    channel = guild.get_channel(log_id)
-    
-    if channel:
-        embed = discord.Embed(title="🛡️ Security System Alert", color=discord.Color.red())
-        embed.add_field(name="👤 الشخص", value=f"{user.mention} (`{user.id}`)", inline=True)
-        embed.add_field(name="⚡ الإجراء", value=f"`{action_name}`", inline=True)
-        embed.add_field(name="🎯 الهدف", value=f"**{target}**", inline=False)
-        embed.add_field(name="⚙️ ما تم تنفيذه", value=f"**{action_type}**", inline=False)
-        if details:
-            embed.add_field(name="📝 تفاصيل الاسترجاع", value=details, inline=False)
-        embed.set_footer(text=f"Server: {guild.name}")
-        try: await channel.send(embed=embed)
-        except: pass
-
-    # التبنيد (لا يستثني أحداً، فقط الوايت لست)
-    if user.id != bot.user.id and user.id not in bot_data.get('whitelisted', []):
-        try: await guild.ban(user, reason=f"Anti-Nuke: {action_name}")
-        except: pass
-
-# --- أحداث الحماية الشاملة ---
-
-
-# قائمة القنوات التي أنشأها البوت (لا يجب لمسها)
-protected_channels = set()
-
-# --- حماية إنشاء القنوات ---
+# --- أحداث الحماية (Events) ---
 @bot.event
 async def on_guild_channel_create(channel):
+    if not bot_data['protection'].get('channel_create', True): return
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        # 1. إذا كان الفاعل هو البوت أو في القائمة البيضاء -> تجاهل
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []):
-            return
-        
-        # 2. إذا كانت القناة محمية (أنشأها البوت) -> تجاهل
-        if channel.id in protected_channels:
-            return
-
-        # 3. هجوم حقيقي: تبنيد + حذف الروم + لوق
+        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
+        if channel.id in protected_channels: return
         try:
-            await channel.guild.ban(entry.user, reason="Anti-Nuke: Unsafe Creation")
             await channel.delete()
-        except:
-            pass
-
+            await channel.guild.ban(entry.user, reason="Anti-Nuke: Unsafe Creation")
+        except: pass
         asyncio.create_task(handle_protection(channel.guild, entry.user, "إنشاء رومات", channel.name, "حذف + تبنيد"))
         break
 
-# --- حماية حذف القنوات ---
+async def fast_restore(channel):
+    try:
+        await asyncio.sleep(0.1)
+        await channel.guild.create_text_channel(
+            name=channel.name, category=channel.category,
+            position=channel.position, overwrites=channel.overwrites,
+            topic=channel.topic, nsfw=channel.nsfw
+        )
+    except Exception as e:
+        print(f"Error restoring channel: {e}")
+    finally:
+        active_restorations.discard(channel.guild.id)
+
 @bot.event
 async def on_guild_channel_delete(channel):
+    if not bot_data['protection'].get('channel_del', True): return
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        # 1. إذا كان الفاعل هو البوت أو في القائمة البيضاء -> تجاهل
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []):
-            return
-
-        # 2. هجوم حقيقي: تبنيد + استرجاع الروم + لوق
+        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
         try:
             await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Deletion")
-            
-            # حماية: إضافة للقائمة قبل الإنشاء
-            protected_channels.add(channel.id)
-            
-            new_ch = await channel.guild.create_text_channel(
-                name=channel.name, category=channel.category,
-                position=channel.position, overwrites=channel.overwrites,
-                topic=channel.topic, nsfw=channel.nsfw
-            )
-            
-            # إزالة من الحماية بعد فترة قصيرة
-            await asyncio.sleep(10)
-            protected_channels.discard(channel.id)
-        except:
-            pass
-
+        except: pass
         asyncio.create_task(handle_protection(channel.guild, entry.user, "حذف رومات", channel.name, "استرجاع + تبنيد"))
+        if channel.guild.id not in active_restorations:
+            active_restorations.add(channel.guild.id)
+            asyncio.create_task(fast_restore(channel))
         break
-
-
-
-
-
 
 @bot.event
 async def on_guild_channel_update(before, after):
+    if not bot_data['protection'].get('channel_update', True): return
     if before.name != after.name:
         async for entry in before.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
             if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
@@ -302,82 +221,14 @@ async def on_guild_channel_update(before, after):
             await after.edit(name=before.name)
             break
 
-# قائمة لتتبع العمليات الجارية (لمنع تكرار التنفيذ)
-active_restorations = set()
-
-@bot.event
-async def on_guild_channel_delete(channel):
-    # 1. التحقق من السجلات (Audit Logs)
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        # تجاهل إذا كان الشخص في القائمة البيضاء
-        if entry.user.id in bot_data.get('whitelisted', []):
-            return
-
-        # 2. تبنيد المخرب فوراً
-        try:
-            await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Deletion")
-        except:
-            pass
-
-        # 3. إرسال اللوق باستخدام دالتك الأصلية
-        asyncio.create_task(handle_protection(
-            guild=channel.guild, 
-            user=entry.user, 
-            action_name="حذف رومات", 
-            target=channel.name, 
-            action_type="استرجاع القناة فوراً"
-        ))
-
-        # 4. استرجاع القناة (بدون تعليق البوت)
-        if channel.guild.id not in active_restorations:
-            active_restorations.add(channel.guild.id)
-            asyncio.create_task(fast_restore(channel))
-        break
-
-async def fast_restore(channel):
-    """دالة استرجاع القناة في الخلفية"""
-    try:
-        # الانتظار لجزء بسيط من الثانية لضمان اكتمال الحدث
-        await asyncio.sleep(0.1)
-        
-        # إعادة إنشاء القناة بنفس الإعدادات
-        await channel.guild.create_text_channel(
-            name=channel.name,
-            category=channel.category,
-            position=channel.position,
-            overwrites=channel.overwrites,
-            topic=channel.topic,
-            nsfw=channel.nsfw
-        )
-    except Exception as e:
-        print(f"Error restoring channel: {e}")
-    finally:
-        active_restorations.discard(channel.guild.id)
-# --- حماية إنشاء القنوات ---
-@bot.event
-async def on_guild_channel_create(channel):
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        # إذا كان الفاعل هو البوت أو في القائمة البيضاء -> تجاهل
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []):
-            return
-        
-        # إجراء الحماية: حذف الروم المُنشأ فوراً + تبنيد المعتدي + إرسال اللوق
-        try:
-            await channel.delete(reason="Anti-Nuke: Unauthorized Channel Creation")
-            await channel.guild.ban(entry.user, reason="Anti-Nuke: Channel Creation")
-        except:
-            pass
-        
-        asyncio.create_task(handle_protection(channel.guild, entry.user, "إنشاء رومات", channel.name))
-        break
-
-
 @bot.event
 async def on_guild_role_create(role):
+    if not bot_data['protection'].get('role_create', True): return
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
         if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
         await handle_protection(role.guild, entry.user, "إنشاء رتبة", role.name, "تبنيد المخرب + حذف الرتبة")
-        await role.delete()
+        try: await role.delete()
+        except: pass
         break
 
 @bot.event
@@ -389,60 +240,22 @@ async def on_guild_role_update(before, after):
             await after.edit(name=before.name)
             break
 
-@bot.event
-async def on_webhooks_update(channel):
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await handle_protection(channel.guild, entry.user, "إنشاء ويب هوك", "Webhook", "تبنيد المخرب + حذف الويب هوك")
-        webhooks = await channel.webhooks()
-        for wh in webhooks: await wh.delete()
-        break
-
-
+# --- معالجة الرسائل والردود التلقائية ---
 @bot.event
 async def on_message(message):
-    if message.author == bot.user:
+    if message.author.bot:
         return
     
-   
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # نظام الردود التلقائية
+    gid = str(message.guild.id) if message.guild else None
+    if gid and gid in bot_data.get('auto_responses', {}):
+        responses = bot_data['auto_responses'][gid]
+        for word, res in responses.items():
+            if word in message.content:
+                await message.channel.send(res)
+                break
+                
+    await bot.process_commands(message)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -452,7 +265,6 @@ async def on_voice_state_update(member, before, after):
             except: pass
 
 # --- أوامر السلاش (Slash Commands) ---
-
 @bot.tree.command(name="setup_radio", description="إرسال رسالة نظام الموجات")
 async def setup_radio(interaction: discord.Interaction):
     if not await check_hierarchy(interaction): return
@@ -463,7 +275,7 @@ async def setup_radio(interaction: discord.Interaction):
     await interaction.response.send_message("✅ تم الإرسال.", ephemeral=True)
 
 @bot.tree.command(name="whitelist", description="القائمة البيضاء")
-async def whitelist(interaction: discord.Interaction, user: discord.Member):
+async def whitelist_cmd(interaction: discord.Interaction, user: discord.Member):
     if not await check_hierarchy(interaction): return
     if user.id in bot_data['whitelisted']:
         bot_data['whitelisted'].remove(user.id)
@@ -529,23 +341,6 @@ async def set_log(interaction: discord.Interaction, channel: discord.TextChannel
     save_data(bot_data)
     await interaction.response.send_message(f"✅ تم التحديد.", ephemeral=True)
 
-@bot.command()
-@commands.is_owner()
-async def sync(ctx):
-    await bot.tree.sync()
-    await ctx.send("✅ تم مزامنة الأوامر يدوياً!")
-
-@bot.event
-async def on_guild_join(guild):
-    await ensure_log_channel(guild)
-
-@bot.event
-async def on_ready():
-    for guild in bot.guilds: await ensure_log_channel(guild)
-    print(f"✅ {bot.user} جاهز للعمل بجميع الميزات!")
-
-
-
 @bot.tree.command(name="protection", description="تفعيل أو تعطيل أنواع الحماية")
 @app_commands.choices(feature=[
     app_commands.Choice(name="حذف القنوات", value="channel_del"),
@@ -558,12 +353,20 @@ async def on_ready():
 ])
 async def protection(interaction: discord.Interaction, feature: app_commands.Choice[str], status: bool):
     if not await check_hierarchy(interaction): return
-    
-    # تحديث الحالة في البيانات
     bot_data['protection'][feature.value] = status
     save_data(bot_data)
-    
     state = "✅ مفعل" if status else "❌ معطل"
     await interaction.response.send_message(f"تم تغيير حالة ({feature.name}) إلى: {state}", ephemeral=True)
 
+@bot.event
+async def on_guild_join(guild):
+    await ensure_log_channel(guild)
+
+@bot.event
+async def on_ready():
+    for guild in bot.guilds: await ensure_log_channel(guild)
+    print(f"✅ {bot.user} جاهز للعمل بجميع الميزات!")
+
+# جلب التوكن وتشغيل البوت
+TOKEN = os.getenv('TOKEN')
 bot.run(TOKEN)
