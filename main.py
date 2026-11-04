@@ -59,7 +59,11 @@ local_cache = {
     'roles': {},     
     'categories': {} 
 }
-event_history = set()
+
+# --- نظام قفل منع التكرار والطابور المجمع ---
+processed_channels = set()
+channel_queue = asyncio.Queue()
+is_processing_queue = False
 
 def update_guild_cache(guild):
     for cat in guild.categories:
@@ -88,19 +92,55 @@ def update_guild_cache(guild):
         }
 
 async def safe_execute(coro):
-    """دالة ذكية تتعامل تلقائياً مع الـ Rate Limit وتنتظر الوقت المطلوب دون أن يتعطل البوت"""
     while True:
         try:
             return await coro
         except discord.HTTPException as e:
             if e.status == 429:
-                # إذا حصل لمتد، البوت ينتظر الوقت المحدد بدقة ثم يعيد المحاولة
                 retry_after = float(e.response.headers.get('Retry-After', 1))
                 await asyncio.sleep(retry_after + 0.1)
             else:
                 break
         except Exception:
             break
+
+async def process_channel_queue(guild):
+    global is_processing_queue
+    if is_processing_queue: return
+    is_processing_queue = True
+    
+    await asyncio.sleep(0.5) # نافذة تجميع الطلبات لمنع التكرار وضغط اللمتد
+    
+    while not channel_queue.empty():
+        item = await channel_queue.get()
+        channel_id = item['id']
+        channel = item['channel']
+        user = item['user']
+        
+        if channel_id in processed_channels:
+            channel_queue.task_done()
+            continue
+            
+        processed_channels.add(channel_id)
+        
+        try:
+            data = local_cache['channels'].get(channel_id)
+            if isinstance(channel, discord.CategoryChannel):
+                cat_data = local_cache['categories'].get(channel_id, {'name': channel.name, 'position': channel.position, 'overwrites': channel.overwrites})
+                new_cat = await safe_execute(guild.create_category(name=cat_data['name'], position=cat_data['position'], overwrites=cat_data['overwrites']))
+                if new_cat: local_cache['categories'][new_cat.id] = cat_data
+            elif isinstance(channel, discord.VoiceChannel):
+                cat = guild.get_channel(data['category_id']) if data and data.get('category_id') else None
+                await safe_execute(guild.create_voice_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites))
+            else:
+                cat = guild.get_channel(data['category_id']) if data and data.get('category_id') else None
+                await safe_execute(guild.create_text_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites, topic=getattr(channel, 'topic', None), nsfw=getattr(channel, 'nsfw', False)))
+        except Exception as e:
+            print(f"Queue Restore Error: {e}")
+            
+        channel_queue.task_done()
+        
+    is_processing_queue = False
 
 async def ensure_log_channel(guild: discord.Guild):
     gid = str(guild.id)
@@ -121,15 +161,13 @@ async def ensure_log_channel(guild: discord.Guild):
     save_data(bot_data)
     return channel
 
-async def handle_protection_log(guild, user, action_name, target, action_type=""):
+async def handle_protection_log(guild, user, action_name, target):
     channel = await ensure_log_channel(guild)
     if channel:
-        embed = discord.Embed(title="🛡️ Anti-Nuke Rate-Limit Shield", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+        embed = discord.Embed(title="🛡️ Anti-Nuke Queue Shield", color=discord.Color.red(), timestamp=discord.utils.utcnow())
         embed.add_field(name="👤 الفاعل", value=f"{user.mention} (`{user.id}`)", inline=True)
         embed.add_field(name="⚡ الإجراء", value=f"`{action_name}`", inline=True)
         embed.add_field(name="🎯 الهدف", value=f"**{target}**", inline=False)
-        if action_type:
-            embed.add_field(name="⚙️ ما تم تنفيذه", value=f"**{action_type}**", inline=False)
         try: await channel.send(embed=embed)
         except: pass
 
@@ -171,7 +209,7 @@ class RadioView(discord.ui.View):
 async def setup_hook():
     bot.add_view(RadioView()) 
     await bot.tree.sync()
-    print("✅ تم تفعيل النظام ومزامنة الأوامر!")
+    print("✅ تم تفعيل النظام بنظام الطابور المجمع المانع للتكرار!")
 
 async def check_hierarchy(interaction: discord.Interaction) -> bool:
     if interaction.user.id == interaction.guild.owner_id: return True
@@ -181,12 +219,11 @@ async def check_hierarchy(interaction: discord.Interaction) -> bool:
         return False
     return True
 
-# --- أحداث الحماية مع تجاوز اللمتد (Safe Execute) ---
+# --- أحداث الحماية عبر الطابور المجمع (Queue) ---
 
 @bot.event
 async def on_guild_channel_delete(channel):
-    if not bot_data['protection'].get('channel_del', True) or channel.id in event_history: return
-    event_history.add(channel.id)
+    if not bot_data['protection'].get('channel_del', True) or channel.id in processed_channels: return
 
     user = bot.user
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
@@ -194,34 +231,15 @@ async def on_guild_channel_delete(channel):
         break
 
     if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []):
-        event_history.discard(channel.id)
         return
 
-    try:
-        data = local_cache['channels'].get(channel.id)
-        if isinstance(channel, discord.CategoryChannel):
-            cat_data = local_cache['categories'].get(channel.id, {'name': channel.name, 'position': channel.position, 'overwrites': channel.overwrites})
-            new_cat = await safe_execute(channel.guild.create_category(name=cat_data['name'], position=cat_data['position'], overwrites=cat_data['overwrites']))
-            if new_cat: local_cache['categories'][new_cat.id] = cat_data
-            await handle_protection_log(channel.guild, user, "حذف كاتيجوري", channel.name, "تبنيد فوري + استرجاع آمن")
-        elif isinstance(channel, discord.VoiceChannel):
-            cat = channel.guild.get_channel(data['category_id']) if data and data.get('category_id') else None
-            await safe_execute(channel.guild.create_voice_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites))
-            await handle_protection_log(channel.guild, user, "حذف روم صوتي", channel.name, "تبنيد فوري + استرجاع آمن")
-        else:
-            cat = channel.guild.get_channel(data['category_id']) if data and data.get('category_id') else None
-            await safe_execute(channel.guild.create_text_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites, topic=getattr(channel, 'topic', None), nsfw=getattr(channel, 'nsfw', False)))
-            await handle_protection_log(channel.guild, user, "حذف روم كتابي", channel.name, "تبنيد فوري + استرجاع آمن")
-    except Exception as e:
-        print(f"Restore Error: {e}")
-    finally:
-        await asyncio.sleep(1)
-        event_history.discard(channel.id)
+    await handle_protection_log(channel.guild, user, "حذف جماعي/فردي", channel.name)
+    await channel_queue.put({'id': channel.id, 'channel': channel, 'user': user})
+    asyncio.create_task(process_channel_queue(channel.guild))
 
 @bot.event
 async def on_guild_role_delete(role):
-    if not bot_data['protection'].get('role_del', True) or role.id in event_history: return
-    event_history.add(role.id)
+    if not bot_data['protection'].get('role_del', True): return
 
     user = bot.user
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
@@ -229,19 +247,15 @@ async def on_guild_role_delete(role):
         break
 
     if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []):
-        event_history.discard(role.id)
         return
 
     try:
         r_data = local_cache['roles'].get(role.id, {'name': role.name, 'permissions': role.permissions, 'color': role.color, 'hoist': role.hoist, 'mentionable': role.mentionable})
         new_role = await safe_execute(role.guild.create_role(name=r_data['name'], permissions=r_data['permissions'], color=r_data['color'], hoist=r_data['hoist'], mentionable=r_data['mentionable']))
         if new_role: local_cache['roles'][new_role.id] = r_data
-        await handle_protection_log(role.guild, user, "حذف رتبة", role.name, "تبنيد فوري + استرجاع آمن")
+        await handle_protection_log(role.guild, user, "حذف رتبة", role.name)
     except Exception as e:
         print(f"Role Restore Error: {e}")
-    finally:
-        await asyncio.sleep(1)
-        event_history.discard(role.id)
 
 @bot.event
 async def on_guild_channel_create(channel):
@@ -312,7 +326,7 @@ async def on_ready():
     for guild in bot.guilds:
         update_guild_cache(guild)
         await ensure_log_channel(guild)
-    print(f"✅ {bot.user} جاهز للعمل بنظام تجاوز اللمتد الذكي!")
+    print(f"✅ {bot.user} جاهز للعمل بنظام الطابور المجمع (Queue) لمنع التكرار!")
 
 TOKEN = os.getenv('TOKEN')
 bot.run(TOKEN)
