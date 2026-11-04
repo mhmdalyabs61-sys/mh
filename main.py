@@ -14,9 +14,6 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # --- تعريف البيانات الأساسية ---
-server_snapshot = {'channels': {}, 'roles': {}, 'webhooks': {}}
-whitelist = set()
-
 DATA_FILE = 'bot_data.json'
 
 def load_data():
@@ -62,46 +59,19 @@ def keep_alive():
 
 keep_alive()
 
-# --- تعريفات الحماية الأساسية ودوال الطابور واللوق ---
-active_restorations = set()
+# --- نظام الذاكرة المؤقتة وبصمة الأحداث ---
+event_history = {}
 
-# طابور معالجة الحماية لمنع التداخل والـ Rate Limit
-protection_queue = asyncio.Queue()
-is_processing_queue = False
-
-async def process_protection_queue():
-    global is_processing_queue
-    if is_processing_queue:
-        return
-    is_processing_queue = True
-    
-    while not protection_queue.empty():
-        guild, user, action_type, target_obj = await protection_queue.get()
-        try:
-            if action_type == "channel_delete":
-                await guild.ban(user, reason="Anti-Nuke: Mass Channel Deletion")
-                await handle_protection_log(guild, user, "حذف رومات", target_obj.name, "استرجاع + تبنيد فوري")
-                if guild.id not in active_restorations:
-                    active_restorations.add(guild.id)
-                    asyncio.create_task(fast_restore(target_obj))
-            elif action_type == "role_delete":
-                await guild.ban(user, reason="Anti-Nuke: Mass Role Deletion")
-                await handle_protection_log(guild, user, "حذف رتبة", target_obj.name, "تبنيد فوري")
-            elif action_type == "channel_create":
-                await target_obj.delete()
-                await guild.ban(user, reason="Anti-Nuke: Unsafe Channel Creation")
-                await handle_protection_log(guild, user, "إنشاء رومات", target_obj.name, "حذف القناة + تبنيد فوري")
-            elif action_type == "role_create":
-                await target_obj.delete()
-                await guild.ban(user, reason="Anti-Nuke: Unsafe Role Creation")
-                await handle_protection_log(guild, user, "إنشاء رتبة", target_obj.name, "حذف الرتبة + تبنيد فوري")
-        except Exception as e:
-            print(f"Queue Error: {e}")
-        finally:
-            protection_queue.task_done()
-            await asyncio.sleep(0.05) # فاصل زمني لتجنب حظر الـ Rate Limit
-            
-    is_processing_queue = False
+async def queue_task(target_id, coro):
+    try:
+        await coro
+    except discord.HTTPException as e:
+        if e.status == 429:
+            await asyncio.sleep(e.retry_after)
+            await coro
+    finally:
+        await asyncio.sleep(5)
+        event_history.pop(target_id, None)
 
 async def ensure_log_channel(guild: discord.Guild):
     gid = str(guild.id)
@@ -122,7 +92,7 @@ async def ensure_log_channel(guild: discord.Guild):
     save_data(bot_data)
     return channel
 
-async def handle_protection_log(guild, user, action_name, target, action_type="", details=""):
+async def handle_protection_log(guild, user, action_name, target, action_type=""):
     channel = await ensure_log_channel(guild)
     if channel:
         embed = discord.Embed(title="🛡️ Security System Alert", color=discord.Color.red(), timestamp=discord.utils.utcnow())
@@ -131,24 +101,13 @@ async def handle_protection_log(guild, user, action_name, target, action_type=""
         embed.add_field(name="🎯 الهدف", value=f"**{target}**", inline=False)
         if action_type:
             embed.add_field(name="⚙️ ما تم تنفيذه", value=f"**{action_type}**", inline=False)
-        if details:
-            embed.add_field(name="📝 التفاصيل", value=details, inline=False)
         embed.set_footer(text=f"Server: {guild.name}")
         try: await channel.send(embed=embed)
         except: pass
 
-async def fast_restore(channel):
-    try:
-        await asyncio.sleep(0.1)
-        await channel.guild.create_text_channel(
-            name=channel.name, category=channel.category,
-            position=channel.position, overwrites=channel.overwrites,
-            topic=channel.topic, nsfw=channel.nsfw
-        )
-    except Exception as e:
-        print(f"Error restoring channel: {e}")
-    finally:
-        active_restorations.discard(channel.guild.id)
+    if user.id != bot.user.id and user.id not in bot_data.get('whitelisted', []):
+        try: await guild.ban(user, reason=f"Anti-Nuke: {action_name}")
+        except: pass
 
 # --- واجهات الراديو (UI Components) ---
 class WaveModal(discord.ui.Modal, title='إنشاء/دخول موجة'):
@@ -199,84 +158,140 @@ async def check_hierarchy(interaction: discord.Interaction) -> bool:
         return False
     except: return True
 
-# --- أحداث الحماية (المحدثة بنظام الطابور السريع) ---
-@bot.event
-async def on_guild_channel_create(channel):
-    if not bot_data['protection'].get('channel_create', True): return
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await protection_queue.put((channel.guild, entry.user, "channel_create", channel))
-        asyncio.create_task(process_protection_queue())
-        break
-
+# --- أحداث الحماية المتقدمة والشاملة ---
 @bot.event
 async def on_guild_channel_delete(channel):
-    if not bot_data['protection'].get('channel_del', True): return
+    if not bot_data['protection'].get('channel_del', True) or event_history.get(channel.id): return
+    event_history[channel.id] = True
+    
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await protection_queue.put((channel.guild, entry.user, "channel_delete", channel))
-        asyncio.create_task(process_protection_queue())
+        user = entry.user
+        if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []):
+            event_history.pop(channel.id, None)
+            return
+
+        try:
+            if isinstance(channel, discord.CategoryChannel):
+                # استرجاع الكاتيجوري بكل صلاحياته وترتيبه
+                new_cat = await channel.guild.create_category(
+                    name=channel.name,
+                    position=channel.position,
+                    overwrites=channel.overwrites
+                )
+                await handle_protection_log(channel.guild, user, "حذف كاتيجوري", channel.name, "تبنيد فوري + استرجاع الكاتيجوري")
+                asyncio.create_task(queue_task(new_cat.id, asyncio.sleep(0)))
+                
+            elif isinstance(channel, discord.VoiceChannel):
+                category = channel.category if channel.category else None
+                new_ch = await channel.guild.create_voice_channel(
+                    name=channel.name,
+                    category=category,
+                    position=channel.position,
+                    overwrites=channel.overwrites,
+                    bitrate=getattr(channel, 'bitrate', 64000),
+                    user_limit=getattr(channel, 'user_limit', 0)
+                )
+                await handle_protection_log(channel.guild, user, "حذف روم صوتي", channel.name, "تبنيد فوري + استرجاع الروم الصوتي")
+                asyncio.create_task(queue_task(new_ch.id, asyncio.sleep(0)))
+                
+            else: # Text Channel
+                category = channel.category if channel.category else None
+                new_ch = await channel.guild.create_text_channel(
+                    name=channel.name,
+                    category=category,
+                    position=channel.position,
+                    overwrites=channel.overwrites,
+                    topic=getattr(channel, 'topic', None),
+                    nsfw=getattr(channel, 'nsfw', False),
+                    slowmode_delay=getattr(channel, 'slowmode_delay', 0)
+                )
+                await handle_protection_log(channel.guild, user, "حذف روم كتابي", channel.name, "تبنيد فوري + استرجاع الروم الكتابي بكامل صلاحياته")
+                asyncio.create_task(queue_task(new_ch.id, asyncio.sleep(0)))
+                
+        except Exception as e:
+            print(f"Error restoring channel/category: {e}")
+            event_history.pop(channel.id, None)
         break
 
 @bot.event
-async def on_guild_channel_update(before, after):
-    if not bot_data['protection'].get('channel_update', True): return
-    if before.name != after.name:
-        async for entry in before.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
-            if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-            await handle_protection_log(before.guild, entry.user, "تغيير اسم قناة", before.name, "تبنيد المخرب + إرجاع الاسم")
-            try: await after.edit(name=before.name)
-            except: pass
-            break
-
-@bot.event
-async def on_guild_role_create(role):
-    if not bot_data['protection'].get('role_create', True): return
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await protection_queue.put((role.guild, entry.user, "role_create", role))
-        asyncio.create_task(process_protection_queue())
+async def on_guild_channel_create(channel):
+    if event_history.get(channel.id) or not bot_data['protection'].get('channel_create', True): return
+    
+    await asyncio.sleep(0.3)
+    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
+        user = entry.user
+        if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []): return
+        
+        event_history[channel.id] = True
+        await handle_protection_log(channel.guild, user, "إنشاء رومات/كاتيجوري غير مصرح", channel.name, "تبنيد فوري + حذف العنصر")
+        asyncio.create_task(queue_task(channel.id, channel.delete(reason="حماية: إنشاء غير مصرح")))
         break
 
 @bot.event
 async def on_guild_role_delete(role):
-    if not bot_data['protection'].get('role_del', True): return
+    if not bot_data['protection'].get('role_del', True) or event_history.get(role.id): return
+    event_history[role.id] = True
+    
     async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-        await protection_queue.put((role.guild, entry.user, "role_delete", role))
-        asyncio.create_task(process_protection_queue())
+        user = entry.user
+        if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []):
+            event_history.pop(role.id, None)
+            return
+
+        try:
+            # استرجاع الرتبة بكل تفاصيلها (الاسم، الصلاحيات، اللون، الـ Hoist، والـ Mentionable)
+            new_role = await role.guild.create_role(
+                name=role.name,
+                permissions=role.permissions,
+                color=role.color,
+                hoist=role.hoist,
+                mentionable=role.mentionable,
+                reason="Anti-Nuke: Role Restoration"
+            )
+            # محاولة ضبط موضع الرتبة (Position) إذا أمكن
+            try:
+                await new_role.edit(position=role.position)
+            except:
+                pass
+                
+            await handle_protection_log(role.guild, user, "حذف رتبة", role.name, "تبنيد فوري + استرجاع الرتبة بألوانها وصلاحياتها")
+            asyncio.create_task(queue_task(new_role.id, asyncio.sleep(0)))
+        except Exception as e:
+            print(f"Error restoring role: {e}")
+            event_history.pop(role.id, None)
         break
 
 @bot.event
-async def on_guild_role_update(before, after):
-    if before.name != after.name:
-        async for entry in before.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_update):
-            if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
-            await handle_protection_log(before.guild, entry.user, "تغيير اسم رتبة", before.name, "تبنيد المخرب + إرجاع الاسم")
-            try: await after.edit(name=before.name)
-            except: pass
-            break
+async def on_guild_role_create(role):
+    if event_history.get(role.id) or not bot_data['protection'].get('role_create', True): return
+    
+    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
+        user = entry.user
+        if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []): return
+        
+        event_history[role.id] = True
+        await handle_protection_log(role.guild, user, "إنشاء رتبة غير مصرحة", role.name, "تبنيد فوري + حذف الرتبة")
+        asyncio.create_task(queue_task(role.id, role.delete(reason="حماية: إنشاء رتبة غير مصرح")))
+        break
 
 @bot.event
 async def on_webhooks_update(channel):
     if not bot_data['protection'].get('webhook', True): return
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.webhook_create):
-        if entry.user.id == bot.user.id or entry.user.id in bot_data.get('whitelisted', []): return
+        user = entry.user
+        if user.id == bot.user.id or user.id in bot_data.get('whitelisted', []): return
         try:
-            await channel.guild.ban(entry.user, reason="Anti-Nuke: Unauthorized Webhook")
-            await handle_protection_log(channel.guild, entry.user, "إنشاء ويب هوك", "Webhook", "تبنيد فوري + حذف الويب هوك")
+            await handle_protection_log(channel.guild, user, "إنشاء ويب هوك غير مصرح", "Webhook", "تبنيد فوري + حذف الويب هوك")
             webhooks = await channel.webhooks()
             for wh in webhooks:
-                await wh.delete()
+                asyncio.create_task(queue_task(wh.id, wh.delete(reason="حماية: حذف ويب هوك")))
         except: pass
         break
 
 # --- معالجة الرسائل والردود التلقائية ---
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
-    
+    if message.author.bot: return
     gid = str(message.guild.id) if message.guild else None
     if gid and gid in bot_data.get('auto_responses', {}):
         responses = bot_data['auto_responses'][gid]
@@ -284,7 +299,6 @@ async def on_message(message):
             if word in message.content:
                 await message.channel.send(res)
                 break
-                
     await bot.process_commands(message)
 
 @bot.event
@@ -376,7 +390,7 @@ async def set_log(interaction: discord.Interaction, channel: discord.TextChannel
 
 @bot.tree.command(name="protection", description="تفعيل أو تعطيل أنواع الحماية")
 @app_commands.choices(feature=[
-    app_commands.Choice(name="حذف القنوات", value="channel_del"),
+    app_commands.Choice(name="حذف القنوات والكاتيجوري", value="channel_del"),
     app_commands.Choice(name="تعديل القنوات", value="channel_update"),
     app_commands.Choice(name="حذف الرتب", value="role_del"),
     app_commands.Choice(name="إنشاء الرتب", value="role_create"),
@@ -398,7 +412,7 @@ async def on_guild_join(guild):
 @bot.event
 async def on_ready():
     for guild in bot.guilds: await ensure_log_channel(guild)
-    print(f"✅ {bot.user} جاهز للعمل بجميع الميزات وأنظمة الحماية المطورة!")
+    print(f"✅ {bot.user} جاهز للعمل بكامل القوة: استرجاع الكاتيجوريات، الرومات بكامل الصلاحيات، والرتب بألوانها!")
 
 # جلب التوكن وتشغيل البوت
 TOKEN = os.getenv('TOKEN')
