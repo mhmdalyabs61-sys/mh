@@ -39,7 +39,6 @@ def save_data(data):
 
 bot_data = load_data()
 
-# Flask لابقاء البوت يعمل
 app = Flask('')
 
 @app.route('/')
@@ -55,7 +54,6 @@ def keep_alive():
 
 keep_alive()
 
-# --- ذاكرة التخزين المحلية وطابور الهجمات الجماعية ---
 local_cache = {
     'channels': {},  
     'roles': {},     
@@ -89,6 +87,21 @@ def update_guild_cache(guild):
             'mentionable': r.mentionable, 'position': r.position
         }
 
+async def safe_execute(coro):
+    """دالة ذكية تتعامل تلقائياً مع الـ Rate Limit وتنتظر الوقت المطلوب دون أن يتعطل البوت"""
+    while True:
+        try:
+            return await coro
+        except discord.HTTPException as e:
+            if e.status == 429:
+                # إذا حصل لمتد، البوت ينتظر الوقت المحدد بدقة ثم يعيد المحاولة
+                retry_after = float(e.response.headers.get('Retry-After', 1))
+                await asyncio.sleep(retry_after + 0.1)
+            else:
+                break
+        except Exception:
+            break
+
 async def ensure_log_channel(guild: discord.Guild):
     gid = str(guild.id)
     log_id = bot_data['log_channels'].get(gid)
@@ -111,7 +124,7 @@ async def ensure_log_channel(guild: discord.Guild):
 async def handle_protection_log(guild, user, action_name, target, action_type=""):
     channel = await ensure_log_channel(guild)
     if channel:
-        embed = discord.Embed(title="⚡ Anti-Nuke Shield Alert", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+        embed = discord.Embed(title="🛡️ Anti-Nuke Rate-Limit Shield", color=discord.Color.red(), timestamp=discord.utils.utcnow())
         embed.add_field(name="👤 الفاعل", value=f"{user.mention} (`{user.id}`)", inline=True)
         embed.add_field(name="⚡ الإجراء", value=f"`{action_name}`", inline=True)
         embed.add_field(name="🎯 الهدف", value=f"**{target}**", inline=False)
@@ -121,8 +134,7 @@ async def handle_protection_log(guild, user, action_name, target, action_type=""
         except: pass
 
     if user.id != bot.user.id and user.id not in bot_data.get('whitelisted', []):
-        try: await guild.ban(user, reason=f"Anti-Nuke: {action_name}")
-        except: pass
+        await safe_execute(guild.ban(user, reason=f"Anti-Nuke: {action_name}"))
 
 # --- واجهات الراديو ---
 class WaveModal(discord.ui.Modal, title='إنشاء/دخول موجة'):
@@ -142,10 +154,10 @@ class WaveModal(discord.ui.Modal, title='إنشاء/دخول موجة'):
                 guild.default_role: discord.PermissionOverwrite(connect=False, view_channel=False),
                 interaction.user: discord.PermissionOverwrite(connect=True, view_channel=True)
             }
-            channel = await guild.create_voice_channel(name=wave_name, overwrites=overwrites, category=interaction.user.voice.channel.category)
+            channel = await safe_execute(guild.create_voice_channel(name=wave_name, overwrites=overwrites, category=interaction.user.voice.channel.category))
             await interaction.response.send_message(f"✅ تم إنشاء موجتك: {channel.mention}", ephemeral=True)
         else:
-            await channel.set_permissions(interaction.user, connect=True, view_channel=True)
+            await safe_execute(channel.set_permissions(interaction.user, connect=True, view_channel=True))
             await interaction.response.send_message(f"✅ تم توصيلك بموجة {self.wave_id.value}", ephemeral=True)
         await interaction.user.move_to(channel)
 
@@ -169,7 +181,7 @@ async def check_hierarchy(interaction: discord.Interaction) -> bool:
         return False
     return True
 
-# --- نظام الحماية الفوري والتعامل مع الهجمات الجماعية ---
+# --- أحداث الحماية مع تجاوز اللمتد (Safe Execute) ---
 
 @bot.event
 async def on_guild_channel_delete(channel):
@@ -189,21 +201,21 @@ async def on_guild_channel_delete(channel):
         data = local_cache['channels'].get(channel.id)
         if isinstance(channel, discord.CategoryChannel):
             cat_data = local_cache['categories'].get(channel.id, {'name': channel.name, 'position': channel.position, 'overwrites': channel.overwrites})
-            new_cat = await channel.guild.create_category(name=cat_data['name'], position=cat_data['position'], overwrites=cat_data['overwrites'])
-            local_cache['categories'][new_cat.id] = cat_data
-            await handle_protection_log(channel.guild, user, "حذف كاتيجوري", channel.name, "تبنيد فوري + استرجاع الكاتيجوري")
+            new_cat = await safe_execute(channel.guild.create_category(name=cat_data['name'], position=cat_data['position'], overwrites=cat_data['overwrites']))
+            if new_cat: local_cache['categories'][new_cat.id] = cat_data
+            await handle_protection_log(channel.guild, user, "حذف كاتيجوري", channel.name, "تبنيد فوري + استرجاع آمن")
         elif isinstance(channel, discord.VoiceChannel):
             cat = channel.guild.get_channel(data['category_id']) if data and data.get('category_id') else None
-            await channel.guild.create_voice_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites)
-            await handle_protection_log(channel.guild, user, "حذف روم صوتي", channel.name, "تبنيد فوري + استرجاع فوري")
+            await safe_execute(channel.guild.create_voice_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites))
+            await handle_protection_log(channel.guild, user, "حذف روم صوتي", channel.name, "تبنيد فوري + استرجاع آمن")
         else:
             cat = channel.guild.get_channel(data['category_id']) if data and data.get('category_id') else None
-            await channel.guild.create_text_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites, topic=getattr(channel, 'topic', None), nsfw=getattr(channel, 'nsfw', False))
-            await handle_protection_log(channel.guild, user, "حذف روم كتابي", channel.name, "تبنيد فوري + استرجاع فوري")
+            await safe_execute(channel.guild.create_text_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites, topic=getattr(channel, 'topic', None), nsfw=getattr(channel, 'nsfw', False)))
+            await handle_protection_log(channel.guild, user, "حذف روم كتابي", channel.name, "تبنيد فوري + استرجاع آمن")
     except Exception as e:
         print(f"Restore Error: {e}")
     finally:
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         event_history.discard(channel.id)
 
 @bot.event
@@ -222,13 +234,13 @@ async def on_guild_role_delete(role):
 
     try:
         r_data = local_cache['roles'].get(role.id, {'name': role.name, 'permissions': role.permissions, 'color': role.color, 'hoist': role.hoist, 'mentionable': role.mentionable})
-        new_role = await role.guild.create_role(name=r_data['name'], permissions=r_data['permissions'], color=r_data['color'], hoist=r_data['hoist'], mentionable=r_data['mentionable'])
-        local_cache['roles'][new_role.id] = r_data
-        await handle_protection_log(role.guild, user, "حذف رتبة", role.name, "تبنيد فوري + استرجاع الرتبة بألوانها")
+        new_role = await safe_execute(role.guild.create_role(name=r_data['name'], permissions=r_data['permissions'], color=r_data['color'], hoist=r_data['hoist'], mentionable=r_data['mentionable']))
+        if new_role: local_cache['roles'][new_role.id] = r_data
+        await handle_protection_log(role.guild, user, "حذف رتبة", role.name, "تبنيد فوري + استرجاع آمن")
     except Exception as e:
         print(f"Role Restore Error: {e}")
     finally:
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
         event_history.discard(role.id)
 
 @bot.event
@@ -247,7 +259,7 @@ async def on_webhooks_update(channel):
     try:
         webhooks = await channel.webhooks()
         for wh in webhooks:
-            await wh.delete()
+            await safe_execute(wh.delete())
     except: pass
 
 @bot.event
@@ -285,7 +297,7 @@ async def whitelist_cmd(interaction: discord.Interaction, user: discord.Member):
 @bot.tree.command(name="ban", description="تبنيد عضو")
 async def ban(interaction: discord.Interaction, user: discord.Member, reason: str = "لا يوجد"):
     if not await check_hierarchy(interaction): return
-    await interaction.guild.ban(user, reason=reason)
+    await safe_execute(interaction.guild.ban(user, reason=reason))
     await interaction.response.send_message(f"🔨 تم طرد {user.name}.")
 
 @bot.tree.command(name="set_log", description="تحديد روم اللوق")
@@ -300,7 +312,7 @@ async def on_ready():
     for guild in bot.guilds:
         update_guild_cache(guild)
         await ensure_log_channel(guild)
-    print(f"✅ {bot.user} جاهز للعمل بكامل كفاءة التخزين المحلي!")
+    print(f"✅ {bot.user} جاهز للعمل بنظام تجاوز اللمتد الذكي!")
 
 TOKEN = os.getenv('TOKEN')
 bot.run(TOKEN)
