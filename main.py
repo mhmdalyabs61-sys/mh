@@ -85,18 +85,6 @@ def log_action(action, target, guild_name, result, extra="", guild_id=None):
         if ch_id: asyncio.get_event_loop().create_task(_send_log_embed(ch_id, entry))
 
 LOG_CHANNEL_NAME = "security-log"
-_bot_created_channel_ids:  set[int] = set()
-_bot_created_category_ids: set[int] = set()
-_processing_deletions:     set[int] = set()
-_restoring_channels:       set[str] = set()
-_restoring_categories:     set[str] = set()
-_reverting_renames:        set[int] = set()
-
-# ── Raid tracker ────────────────────────────────────────────────────────────────
-_raid_tracker: dict[int, deque] = defaultdict(lambda: deque(maxlen=30))
-_RAID_THRESHOLD = 3
-_RAID_WINDOW    = 8
-
 _guild_snapshots: dict[int, dict] = {}
 
 def _channel_info(ch):
@@ -132,12 +120,6 @@ def _build_overwrites(guild, owrs):
         if target: result[target] = ow
     return result
 
-def _track_raid(user_id: int) -> bool:
-    now = time.time()
-    q = _raid_tracker[user_id]
-    q.append(now)
-    return sum(1 for t in q if now - t < _RAID_WINDOW) >= _RAID_THRESHOLD
-
 async def _ensure_log_channel(guild: discord.Guild):
     if guild.id in bot.log_channels:
         ch = guild.get_channel(bot.log_channels[guild.id])
@@ -156,11 +138,9 @@ async def _ensure_log_channel(guild: discord.Guild):
         ch = await guild.create_text_channel(name=LOG_CHANNEL_NAME, overwrites=overwrites,
                                              topic="سجل إجراءات MasterGuard — Security log",
                                              reason="MasterGuard: auto-created security log channel")
-        _bot_created_channel_ids.add(ch.id)
         bot.log_channels[guild.id] = ch.id
         return ch
-    except discord.Forbidden: return None
-    except discord.HTTPException: return None
+    except Exception: return None
 
 # ── Bot class ──────────────────────────────────────────────────────────────────
 class MasterGuardBot(commands.Bot):
@@ -195,8 +175,6 @@ async def _try_ban(guild, user, reason, guild_name):
     try:
         await guild.ban(user, reason=reason, delete_message_days=0)
         log_action("BAN", name, guild_name, "✅ تم الباند", reason, guild_id=guild.id)
-    except discord.Forbidden:
-        log_action("BAN", name, guild_name, "❌ فشل (صلاحيات)", reason, guild_id=guild.id)
     except Exception as e:
         log_action("BAN", name, guild_name, f"❌ خطأ: {e}", reason, guild_id=guild.id)
 
@@ -204,18 +182,43 @@ async def _try_kick(member, reason, guild_name):
     try:
         await member.kick(reason=reason)
         log_action("KICK", str(member), guild_name, "✅ تم الكيك", reason, guild_id=member.guild.id)
-    except discord.Forbidden:
-        log_action("KICK", str(member), guild_name, "❌ فشل (صلاحيات)", reason, guild_id=member.guild.id)
+    except Exception: pass
 
-def _ban_task(guild, user, reason, guild_name, member=None):
-    async def _do():
-        if member is not None:
-            if _can_moderate(guild, member): await _try_ban(guild, user, reason, guild_name)
-            else: log_action("BAN", str(user), guild_name, "⚠️ تخطى (رتبة أعلى)", reason, guild_id=guild.id)
-        else: await _try_ban(guild, user, reason, guild_name)
-    asyncio.get_event_loop().create_task(_do())
+# ── الاسترجاع الشامل الفوري (سريع ولا يعلق) ──────────────────────────────────
+async def _restore_missing_channels(guild: discord.Guild):
+    snap = _guild_snapshots.get(guild.id, {})
+    snap_channels = snap.get("channels", {})
+    current_channel_ids = {ch.id for ch in guild.channels}
+    
+    for ch_id, ch_data in snap_channels.items():
+        if ch_id not in current_channel_ids:
+            try:
+                owrs = _build_overwrites(guild, ch_data.get("overwrites", {}))
+                category = guild.get_channel(ch_data["category_id"]) if ch_data["category_id"] else None
+                
+                if ch_data["type"] == discord.ChannelType.text:
+                    new_ch = await guild.create_text_channel(
+                        name=ch_data["name"], category=category, overwrites=owrs,
+                        topic=ch_data.get("topic"), slowmode_delay=ch_data.get("slowmode_delay", 0),
+                        reason="MasterGuard: Fast State Sync Restoration"
+                    )
+                    if ch_data["name"] == LOG_CHANNEL_NAME: bot.log_channels[guild.id] = new_ch.id
+                elif ch_data["type"] == discord.ChannelType.voice:
+                    await guild.create_voice_channel(
+                        name=ch_data["name"], category=category, overwrites=owrs,
+                        bitrate=ch_data.get("bitrate", 64000), user_limit=ch_data.get("user_limit", 0),
+                        reason="MasterGuard: Fast State Sync Restoration"
+                    )
+                elif ch_data["type"] == discord.ChannelType.category:
+                    await guild.create_category(
+                        name=ch_data["name"], overwrites=owrs,
+                        reason="MasterGuard: Fast State Sync Restoration"
+                    )
+                log_action("RESTORE_CHANNEL", ch_data["name"], guild.name, "✅ استُعيدت بنجاح", "استرجاع فوري", guild_id=guild.id)
+            except Exception:
+                pass
 
-# ── 1. Spam & auto-responses ────────────────────────────────────────────────────
+# ── الأحداث الأساسية ──────────────────────────────────────────────────────────
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.id == bot.user.id: return
@@ -224,7 +227,7 @@ async def on_message(message: discord.Message):
     if message.author.bot and bot.settings["spam"]:
         if message.author.id in bot.whitelist: return
         try: await message.delete()
-        except (discord.Forbidden, discord.NotFound): pass
+        except Exception: pass
         log_action("DELETE_MSG", str(message.author), guild_name, "✅ حُذفت", f"بوت سبام", guild_id=gid)
         member = message.guild.get_member(message.author.id) if message.guild else None
         if member and message.guild:
@@ -243,186 +246,95 @@ async def on_message(message: discord.Message):
                 await message.author.timeout(discord.timedelta(minutes=10), reason="سبام")
                 await message.channel.send(f"{message.author.mention} تم كتمك بسبب السبام!")
                 log_action("TIMEOUT", str(message.author), guild_name, "✅ كتم 10 دقائق", "سبام", guild_id=gid)
-            except discord.Forbidden:
-                log_action("TIMEOUT", str(message.author), guild_name, "❌ فشل الكتم", "سبام", guild_id=gid)
+            except Exception: pass
     if message.content in bot.auto_responses: await message.channel.send(bot.auto_responses[message.content])
     await bot.process_commands(message)
 
-# ── 2. Channel & Category protection ───────────────────────────────────────────
 @bot.event
 async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     if not bot.settings["channels"]: return
-    is_category = isinstance(channel, discord.CategoryChannel)
-    if channel.id in _processing_deletions: return
-    _processing_deletions.add(channel.id)
-    guild_name = _guild_name(channel.guild); gid = channel.guild.id
+    guild = channel.guild
+    guild_name = _guild_name(guild)
+    
+    # 1. تشغيل الاسترجاع الشامل الفوري للرومات المفقودة دون أي انتظار
+    asyncio.create_task(_restore_missing_channels(guild))
+
+    # 2. محاولة بند واحدة فقط (بدون تكرار أو محاولات عمياء تسبب لمتد وتلخبط البوت)
     try:
-        async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
-            if not entry.user or entry.user.id == bot.user.id or entry.user.id in bot.whitelist: return
-            is_raid = _track_raid(entry.user.id)
-            if is_raid:
-                log_action("RAID_DETECTED", str(entry.user), guild_name, "🚨 ريد مكتشف — إصلاح فوري", f"حذف {channel.name}", guild_id=gid)
-            if is_category:
-                _restoring_categories.add(channel.name)
-                try:
-                    snap  = _guild_snapshots.get(gid, {}).get("channels", {}).get(channel.id, {})
-                    owrs  = _build_overwrites(channel.guild, snap.get("overwrites", {}))
-                    new_cat = await channel.guild.create_category(name=channel.name, overwrites=owrs or channel.overwrites,
-                                                                  reason="MasterGuard: restoring category")
-                    _bot_created_category_ids.add(new_cat.id)
-                    try: await new_cat.edit(position=channel.position)
-                    except discord.HTTPException: pass
-                    log_action("RESTORE_CATEGORY", channel.name, guild_name, "✅ استُعيدت الكاتقوري", f"حذفها {entry.user}", guild_id=gid)
-                except discord.Forbidden:
-                    log_action("RESTORE_CATEGORY", channel.name, guild_name, "❌ فشل الاسترجاع", f"حذفها {entry.user}", guild_id=gid)
-                finally:
-                    await asyncio.sleep(0.5); _restoring_categories.discard(channel.name)
-                member = channel.guild.get_member(entry.user.id)
-                _ban_task(channel.guild, entry.user if member else discord.Object(id=entry.user.id), "حذف كاتقوري", guild_name, member=member)
-                return
-            _restoring_channels.add(channel.name)
-            try:
-                new = await channel.clone(); _bot_created_channel_ids.add(new.id)
-                edit_kw: dict = {"position": channel.position}
-                if channel.category_id:
-                    cat = channel.guild.get_channel(channel.category_id)
-                    if cat: edit_kw["category"] = cat
-                await new.edit(**edit_kw)
-                if channel.name == LOG_CHANNEL_NAME: bot.log_channels[gid] = new.id
-                log_action("RESTORE_CHANNEL", channel.name, guild_name, "✅ استُعيد", f"حذفه {entry.user}", guild_id=gid)
-                member = channel.guild.get_member(entry.user.id)
-                ban_c = (_try_ban(channel.guild, entry.user, "حذف روم", guild_name)
-                         if member and _can_moderate(channel.guild, member)
-                         else _try_ban(channel.guild, discord.Object(id=entry.user.id), "حذف روم (غادر)", guild_name))
-                async def _clean_dups():
-                    await asyncio.sleep(0.8)
-                    cat = getattr(new, "category", None)
-                    coros = [d.delete(reason="MasterGuard: duplicate") for d in channel.guild.channels
-                             if d.id != new.id and d.name == channel.name and type(d) is type(new) and getattr(d, "category", None) == cat]
-                    if coros: await asyncio.gather(*coros, return_exceptions=True)
-                await asyncio.gather(ban_c, _clean_dups(), return_exceptions=True)
-            except discord.Forbidden:
-                log_action("RESTORE_CHANNEL", channel.name, guild_name, "❌ فشل الاسترجاع", f"حذفه {entry.user}", guild_id=gid)
-            finally:
-                await asyncio.sleep(0.5); _restoring_channels.discard(channel.name)
-    finally: _processing_deletions.discard(channel.id)
+        async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
+            if entry.user and entry.user.id != bot.user.id and entry.user.id not in bot.whitelist:
+                member = guild.get_member(entry.user.id)
+                if member and _can_moderate(guild, member):
+                    await guild.ban(member, reason="Anti-Nuke: Channel Deletion", delete_message_days=0)
+            break
+    except Exception:
+        pass
 
-@bot.event
-async def on_guild_channel_create(channel: discord.abc.GuildChannel):
-    if not bot.settings["channels"]: return
-    is_category = isinstance(channel, discord.CategoryChannel)
-    if channel.id in _bot_created_channel_ids or channel.id in _bot_created_category_ids:
-        _bot_created_channel_ids.discard(channel.id); _bot_created_category_ids.discard(channel.id); return
-    if channel.name in _restoring_channels or channel.name in _restoring_categories or channel.name == LOG_CHANNEL_NAME: return
-    guild_name = _guild_name(channel.guild); gid = channel.guild.id
-    async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_create):
-        if not entry.user or entry.user.id == bot.user.id or entry.user.id in bot.whitelist: return
-        _track_raid(entry.user.id)
-        label = "إنشاء كاتقوري غير مصرح" if is_category else "إنشاء روم غير مصرح به"
-        try: await channel.delete(); log_action("DELETE_CHANNEL", channel.name, guild_name, "✅ حُذف", f"أنشأه {entry.user}", guild_id=gid)
-        except discord.Forbidden: log_action("DELETE_CHANNEL", channel.name, guild_name, "❌ فشل الحذف", f"أنشأه {entry.user}", guild_id=gid)
-        member = channel.guild.get_member(entry.user.id)
-        _ban_task(channel.guild, entry.user if member else discord.Object(id=entry.user.id), label, guild_name, member=member)
-
-@bot.event
-async def on_guild_channel_update(before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
-    if not bot.settings["channels"] or before.name == after.name or after.id in _reverting_renames: return
-    guild_name = _guild_name(after.guild); gid = after.guild.id
-    async for entry in after.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_update):
-        if not entry.user or entry.user.id == bot.user.id or entry.user.id in bot.whitelist: return
-        _reverting_renames.add(after.id)
-        try:
-            await after.edit(name=before.name, reason="MasterGuard: reverting rename")
-            log_action("RENAME_CHANNEL", f"{before.name}←{after.name}", guild_name, "✅ أُعيد الاسم", f"غيّره {entry.user}", guild_id=gid)
-        except discord.Forbidden:
-            log_action("RENAME_CHANNEL", f"{before.name}←{after.name}", guild_name, "❌ فشل", f"غيّره {entry.user}", guild_id=gid)
-        finally:
-            await asyncio.sleep(2); _reverting_renames.discard(after.id)
-        member = after.guild.get_member(entry.user.id)
-        _ban_task(after.guild, entry.user if member else discord.Object(id=entry.user.id), "تغيير اسم روم", guild_name, member=member)
-
-# ── 3. Role protection ─────────────────────────────────────────────────────────
 @bot.event
 async def on_guild_role_delete(role: discord.Role):
     if not bot.settings["roles"]: return
-    guild_name = _guild_name(role.guild); gid = role.guild.id
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
+    guild = role.guild
+    guild_name = _guild_name(guild)
+    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.role_delete):
         if not entry.user or entry.user.id == bot.user.id or entry.user.id in bot.whitelist: return
-        _track_raid(entry.user.id)
-        snap = _guild_snapshots.get(gid, {}).get("roles", {}).get(role.id, {})
-        async def _restore():
-            try:
-                nr = await role.guild.create_role(name=role.name, permissions=role.permissions, color=role.color,
-                                                  hoist=snap.get("hoist", role.hoist), mentionable=snap.get("mentionable", role.mentionable))
-                try: await nr.edit(position=snap.get("position", role.position))
-                except discord.HTTPException: pass
-                log_action("RESTORE_ROLE", role.name, guild_name, "✅ استُعيدت", f"حذفها {entry.user}", guild_id=gid)
-            except discord.Forbidden:
-                log_action("RESTORE_ROLE", role.name, guild_name, "❌ فشل", f"حذفها {entry.user}", guild_id=gid)
-        member = role.guild.get_member(entry.user.id)
-        ban_c = (_try_ban(role.guild, entry.user, "حذف رتبة", guild_name)
-                 if member and _can_moderate(role.guild, member)
-                 else _try_ban(role.guild, discord.Object(id=entry.user.id), "حذف رتبة (غادر)", guild_name))
-        await asyncio.gather(_restore(), ban_c, return_exceptions=True)
+        snap_roles = _guild_snapshots.get(guild.id, {}).get("roles", {})
+        role_data = snap_roles.get(role.id, {})
+        try:
+            nr = await guild.create_role(
+                name=role.name, permissions=role.permissions, color=role.color,
+                hoist=role_data.get("hoist", role.hoist), mentionable=role_data.get("mentionable", role.mentionable),
+                reason="MasterGuard: Role Restoration"
+            )
+            try: await nr.edit(position=role_data.get("position", role.position))
+            except Exception: pass
+            log_action("RESTORE_ROLE", role.name, guild_name, "✅ استُعيدت الرتبة", f"حذفها {entry.user}", guild_id=guild.id)
+        except Exception:
+            pass
+        member = guild.get_member(entry.user.id)
+        if member and _can_moderate(guild, member):
+            asyncio.create_task(_try_ban(guild, member, "حذف رتبة", guild_name))
+        break
 
-@bot.event
-async def on_guild_role_create(role: discord.Role):
-    if not bot.settings["roles"]: return
-    guild_name = _guild_name(role.guild); gid = role.guild.id
-    async for entry in role.guild.audit_logs(limit=1, action=discord.AuditLogAction.role_create):
-        if not entry.user or entry.user.id == bot.user.id or entry.user.id in bot.whitelist: return
-        _track_raid(entry.user.id)
-        try: await role.delete(); log_action("DELETE_ROLE", role.name, guild_name, "✅ حُذفت", f"أنشأها {entry.user}", guild_id=gid)
-        except discord.Forbidden: log_action("DELETE_ROLE", role.name, guild_name, "❌ فشل", f"أنشأها {entry.user}", guild_id=gid)
-        member = role.guild.get_member(entry.user.id)
-        _ban_task(role.guild, entry.user if member else discord.Object(id=entry.user.id), "إنشاء رتبة غير مصرح", guild_name, member=member)
-
-# ── 4. Webhook & server protection ────────────────────────────────────────────
 @bot.event
 async def on_webhooks_update(channel: discord.abc.GuildChannel):
     if not bot.settings["webhooks"]: return
-    guild_name = _guild_name(channel.guild); gid = channel.guild.id if channel.guild else None
     try:
         webhooks = await channel.webhooks()
-        await asyncio.gather(*[wb.delete() for wb in webhooks], return_exceptions=True)
-        for wb in webhooks: log_action("DELETE_WEBHOOK", wb.name, guild_name, "✅ حُذف", f"في #{getattr(channel,'name','?')}", guild_id=gid)
-    except discord.Forbidden:
-        log_action("DELETE_WEBHOOK", "?", guild_name, "❌ فشل (صلاحيات)", "", guild_id=gid)
+        for wb in webhooks:
+            await wb.delete(reason="MasterGuard: Delete webhook")
+            log_action("DELETE_WEBHOOK", wb.name, channel.guild.name, "✅ حُذف", "", guild_id=channel.guild.id)
+    except Exception: pass
 
 @bot.event
 async def on_guild_update(before: discord.Guild, after: discord.Guild):
-    if not bot.settings["guild_update"]: return
-    if before.name == after.name and before.icon == after.icon: return
+    if not bot.settings["guild_update"] or (before.name == after.name and before.icon == after.icon): return
     async for entry in after.audit_logs(limit=1, action=discord.AuditLogAction.guild_update):
         if not entry.user or entry.user.id == bot.user.id or entry.user.id in bot.whitelist: return
-        guild_name = after.name; gid = after.id
-        snap = _guild_snapshots.get(gid, {})
+        snap = _guild_snapshots.get(after.id, {})
         try:
             icon_bytes = snap.get("icon") or (await before.icon.read() if before.icon else None)
-            name_to_restore = snap.get("name", before.name)
-            await after.edit(name=name_to_restore, icon=icon_bytes)
-            log_action("RESTORE_GUILD", name_to_restore, guild_name, "✅ استُعيدت البيانات", f"غيّرها {entry.user}", guild_id=gid)
-        except discord.Forbidden:
-            log_action("RESTORE_GUILD", before.name, guild_name, "❌ فشل الاسترجاع", f"غيّرها {entry.user}", guild_id=gid)
-        _ban_task(after, entry.user, "تغيير اسم/صورة السيرفر", guild_name, member=after.get_member(entry.user.id))
+            await after.edit(name=snap.get("name", before.name), icon=icon_bytes)
+            log_action("RESTORE_GUILD", before.name, after.name, "✅ استُعيدت البيانات", f"غيّرها {entry.user}", guild_id=after.id)
+        except Exception: pass
+        member = after.get_member(entry.user.id)
+        if member and _can_moderate(after, member):
+            asyncio.create_task(_try_ban(after, member, "تغيير بيانات السيرفر", after.name))
+        break
 
-# ── 5. Unauthorized bot protection ─────────────────────────────────────────────
 @bot.event
 async def on_member_join(member: discord.Member):
     if not member.bot or not bot.settings["bots"] or member.id == bot.user.id: return
-    guild_name = _guild_name(member.guild); gid = member.guild.id
-    async for entry in member.guild.audit_logs(limit=1, action=discord.AuditLogAction.bot_add):
+    guild = member.guild
+    async for entry in guild.audit_logs(limit=1, action=discord.AuditLogAction.bot_add):
         if entry.target and entry.target.id == member.id and entry.user and entry.user.id not in bot.whitelist:
-            adder = member.guild.get_member(entry.user.id)
-            async def _kick():
-                try: await member.kick(); log_action("KICK_BOT", str(member), guild_name, "✅ طُرد البوت", f"أضافه {entry.user}", guild_id=gid)
-                except discord.Forbidden: log_action("KICK_BOT", str(member), guild_name, "❌ فشل الطرد", f"أضافه {entry.user}", guild_id=gid)
-            ban_c = (_try_ban(member.guild, entry.user, "إضافة بوت غير موثوق", guild_name)
-                     if adder and _can_moderate(member.guild, adder)
-                     else _try_ban(member.guild, discord.Object(id=entry.user.id), "إضافة بوت غير موثوق", guild_name))
-            await asyncio.gather(_kick(), ban_c, return_exceptions=True)
+            try: await member.kick()
+            except Exception: pass
+            adder = guild.get_member(entry.user.id)
+            if adder and _can_moderate(guild, adder):
+                asyncio.create_task(_try_ban(guild, adder, "إضافة بوت غير موثوق", guild.name))
+            break
 
-# ── 6. Slash commands ───────────────────────────────────────────────────────────
+# ── أوامر السلاش كاملة ────────────────────────────────────────────────────────
 @bot.tree.command(name="setlog", description="تحديد روم اللوق")
 async def cmd_setlog(interaction: discord.Interaction, channel: discord.TextChannel):
     if not interaction.guild: return await interaction.response.send_message("يعمل داخل السيرفر فقط.", ephemeral=True)
@@ -465,7 +377,6 @@ async def check_protection(interaction: discord.Interaction):
         f"- بيانات السيرفر: {'✅ مفعلة' if s['guild_update'] else '❌ معطلة'}",
         f"- البوتات الغير موثوقة: {'✅ مفعلة' if s['bots'] else '❌ معطلة'}",
         f"- السبام: {'✅ مفعلة' if s['spam'] else '❌ معطلة'}",
-        f"- كشف الريد: ✅ دائماً مفعل ({_RAID_THRESHOLD} أكشن/{_RAID_WINDOW}ث)",
         f"- القائمة البيضاء: {len(bot.whitelist)} مستخدم",
         f"- روم اللوق: {log_ch}",
         f"- إجمالي الإجراءات: {len(action_log)}",
@@ -512,9 +423,7 @@ async def cmd_unverified_bots(interaction: discord.Interaction, state: bool):
     bot.settings["bots"] = state; txt = "✅ مفعلة" if state else "❌ معطلة"
     gid = interaction.guild.id if interaction.guild else None
     log_action("TOGGLE","البوتات الغير موثوقة", interaction.guild.name if interaction.guild else "DM", txt, f"بواسطة {interaction.user}", guild_id=gid)
-    msg = (f"🤖 حماية **البوتات الغير موثوقة**: {txt}\nأي بوت يُضاف بدون إذن سيُطرد فوراً ويُباند من أضافه."
-           if state else f"🤖 حماية **البوتات الغير موثوقة**: {txt}\nيمكن الآن إضافة بوتات بحرية.")
-    await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.response.send_message(f"🤖 حماية **البوتات الغير موثوقة**: {txt}", ephemeral=True)
 
 @bot.tree.command(name="logs", description="عرض آخر 10 إجراءات")
 async def cmd_logs(interaction: discord.Interaction):
@@ -531,13 +440,10 @@ async def cmd_server_info(interaction: discord.Interaction):
     embed.add_field(name="الرومات", value=str(len(g.channels)), inline=True)
     embed.add_field(name="الرتب",   value=str(len(g.roles)),   inline=True)
     embed.add_field(name="المالك",  value=str(g.owner),        inline=True)
-    embed.add_field(name="تاريخ الإنشاء", value=g.created_at.strftime("%Y-%m-%d"), inline=True)
-    if g.icon: embed.set_thumbnail(url=g.icon.url)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- كود إبقاء البوت حياً ---
+# --- إبقاء البوت حياً ---
 app = Flask('')
-
 @app.route('/')
 def home():
     return "MasterGuard is Online!"
@@ -545,11 +451,7 @@ def home():
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-def keep_alive():
+if __name__ == "__main__":
     t = Thread(target=run_flask)
     t.start()
-
-# --- تشغيل البوت ---
-if __name__ == "__main__":
-    keep_alive()
     bot.run(TOKEN)
