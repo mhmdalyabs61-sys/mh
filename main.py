@@ -39,7 +39,7 @@ def save_data(data):
 
 bot_data = load_data()
 
-# Flask لابقاء البوت يعمل على Render
+# Flask لابقاء البوت يعمل
 app = Flask('')
 
 @app.route('/')
@@ -55,11 +55,11 @@ def keep_alive():
 
 keep_alive()
 
-# --- ذاكرة محلية للتخزين السريع الفوري (Local Cache) ---
+# --- ذاكرة التخزين المحلية وطابور الهجمات الجماعية ---
 local_cache = {
-    'channels': {},  # channel_id: details
-    'roles': {},     # role_id: details
-    'categories': {} # category_id: details
+    'channels': {},  
+    'roles': {},     
+    'categories': {} 
 }
 event_history = set()
 
@@ -111,7 +111,7 @@ async def ensure_log_channel(guild: discord.Guild):
 async def handle_protection_log(guild, user, action_name, target, action_type=""):
     channel = await ensure_log_channel(guild)
     if channel:
-        embed = discord.Embed(title="⚡ Lightning Protection Alert", color=discord.Color.red(), timestamp=discord.utils.utcnow())
+        embed = discord.Embed(title="⚡ Anti-Nuke Shield Alert", color=discord.Color.red(), timestamp=discord.utils.utcnow())
         embed.add_field(name="👤 الفاعل", value=f"{user.mention} (`{user.id}`)", inline=True)
         embed.add_field(name="⚡ الإجراء", value=f"`{action_name}`", inline=True)
         embed.add_field(name="🎯 الهدف", value=f"**{target}**", inline=False)
@@ -169,14 +169,13 @@ async def check_hierarchy(interaction: discord.Interaction) -> bool:
         return False
     return True
 
-# --- أحداث الحماية الفورية عبر الذاكرة المحلية ---
+# --- نظام الحماية الفوري والتعامل مع الهجمات الجماعية ---
 
 @bot.event
 async def on_guild_channel_delete(channel):
     if not bot_data['protection'].get('channel_del', True) or channel.id in event_history: return
     event_history.add(channel.id)
 
-    # جلب الفاعل سريعاً
     user = bot.user
     async for entry in channel.guild.audit_logs(limit=1, action=discord.AuditLogAction.channel_delete):
         user = entry.user
@@ -186,7 +185,6 @@ async def on_guild_channel_delete(channel):
         event_history.discard(channel.id)
         return
 
-    # استرجاع فوري من الذاكرة المحلية بدون تأخير
     try:
         data = local_cache['channels'].get(channel.id)
         if isinstance(channel, discord.CategoryChannel):
@@ -196,16 +194,16 @@ async def on_guild_channel_delete(channel):
             await handle_protection_log(channel.guild, user, "حذف كاتيجوري", channel.name, "تبنيد فوري + استرجاع الكاتيجوري")
         elif isinstance(channel, discord.VoiceChannel):
             cat = channel.guild.get_channel(data['category_id']) if data and data.get('category_id') else None
-            await channel.guild.create_voice_channel(name=channel.name, category=cat, position=channel.position, overwrites=channel.overwrites)
+            await channel.guild.create_voice_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites)
             await handle_protection_log(channel.guild, user, "حذف روم صوتي", channel.name, "تبنيد فوري + استرجاع فوري")
         else:
             cat = channel.guild.get_channel(data['category_id']) if data and data.get('category_id') else None
-            await channel.guild.create_text_channel(name=channel.name, category=cat, position=channel.position, overwrites=channel.overwrites, topic=getattr(channel, 'topic', None), nsfw=getattr(channel, 'nsfw', False))
+            await channel.guild.create_text_channel(name=channel.name, category=cat, position=data.get('position', 0) if data else 0, overwrites=channel.overwrites, topic=getattr(channel, 'topic', None), nsfw=getattr(channel, 'nsfw', False))
             await handle_protection_log(channel.guild, user, "حذف روم كتابي", channel.name, "تبنيد فوري + استرجاع فوري")
     except Exception as e:
         print(f"Restore Error: {e}")
     finally:
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
         event_history.discard(channel.id)
 
 @bot.event
@@ -230,7 +228,7 @@ async def on_guild_role_delete(role):
     except Exception as e:
         print(f"Role Restore Error: {e}")
     finally:
-        await asyncio.sleep(3)
+        await asyncio.sleep(2)
         event_history.discard(role.id)
 
 @bot.event
@@ -302,7 +300,7 @@ async def on_ready():
     for guild in bot.guilds:
         update_guild_cache(guild)
         await ensure_log_channel(guild)
-    print(f"✅ {bot.user} جاهز للعمل بسرعة فائقة عبر الذاكرة المحلية الفورية!")
+    print(f"✅ {bot.user} جاهز للعمل بكامل كفاءة التخزين المحلي!")
 
 TOKEN = os.getenv('TOKEN')
 bot.run(TOKEN)
