@@ -1,15 +1,23 @@
 import os
 import io
 import discord
+from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageOps, ImageDraw
 import aiohttp
 
 intents = discord.Intents.default()
-intents.message_content = True
-
 client = commands.Bot(command_prefix="!", intents=intents)
 TOKEN = os.getenv("TOKEN")
+
+@client.event
+async def on_ready():
+    print(f"تم تسجيل الدخول بنجاح باسم: {client.user.name}")
+    try:
+        synced = await client.tree.sync()
+        print(f"تمت مزامنة {len(synced)} من الأوامر.")
+    except Exception as e:
+        print(f"حدث خطأ أثناء المزامنة: {e}")
 
 # دالة لدمج البنر والبروفايل بالشكل المطلوب تماماً
 async def create_banner_profile_image(banner_url: str, avatar_url: str) -> discord.File:
@@ -59,45 +67,7 @@ async def create_banner_profile_image(banner_url: str, avatar_url: str) -> disco
 
     return discord.File(buffer, filename="profile_preview.jpg")
 
-# نافذة إدخال الروابط (Modal) عند كتابة !pnr
-class ProfileModal(discord.ui.Modal, title="إنشاء طقم البنر والبروفايل"):
-    banner_input = discord.ui.TextInput(
-        label="رابط البنر",
-        placeholder="ضع رابط البنر هنا...",
-        style=discord.TextStyle.short,
-        required=True
-    )
-    
-    avatar_input = discord.ui.TextInput(
-        label="رابط البروفايل",
-        placeholder="ضع رابط صورة البروفايل هنا...",
-        style=discord.TextStyle.short,
-        required=True
-    )
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(thinking=True, ephemeral=True)
-
-        banner_url = self.banner_input.value
-        avatar_url = self.avatar_input.value
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(banner_url) as resp:
-                    banner_bytes = await resp.read()
-                async with session.get(avatar_url) as resp:
-                    avatar_bytes = await resp.read()
-
-            image_file = await create_banner_profile_image(banner_url, avatar_url)
-            view = DownloadView(banner_bytes, avatar_bytes)
-
-            # إرسال الصورة المدمجة في الشات مع زر الإيموجي فقط
-            await interaction.channel.send(file=image_file, view=view)
-            await interaction.followup.send("✅ تم إنشاء الصورة ونشرها بنجاح!", ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ حدث خطأ أثناء المعالجة: {e}", ephemeral=True)
-
-# كلاس الزر لإرسال الصورتين كملفات حقيقية بالخاص بدون كلام
+# كلاس الزر لإرسال الصورتين كملفات حقيقية بالخاص
 class DownloadView(discord.ui.View):
     def __init__(self, banner_bytes: bytes, avatar_bytes: bytes):
         super().__init__(timeout=None)
@@ -111,27 +81,39 @@ class DownloadView(discord.ui.View):
             banner_file = discord.File(io.BytesIO(self.banner_bytes), filename="banner.png")
             avatar_file = discord.File(io.BytesIO(self.avatar_bytes), filename="avatar.png")
             
-            # إرسال الصورتين كملفات مباشرة في الخاص بدون أي نصوص أو روابط
+            # إرسال الصورتين في الخاص مباشرة بدون أي كلام
             await user.send(files=[banner_file, avatar_file])
             await interaction.response.send_message("✅ تم إرسال الصور إلى خاصك كملفات!", ephemeral=True)
         except discord.Forbidden:
             await interaction.response.send_message("❌ عذراً، خاصك (DMs) مغلق!", ephemeral=True)
 
-@client.event
-async def on_ready():
-    print(f"تم تسجيل الدخول بنجاح باسم: {client.user.name}")
+@client.tree.command(name="setprofile", description="دمج وإرسال طقم البنر والبروفايل إلى روم محدد")
+@app_commands.describe(
+    banner_url="رابط صورة البنر",
+    avatar_url="رابط صورة البروفايل",
+    channel="الروم الذي تريد إرسال النتيجة إليه"
+)
+async def setprofile_command(interaction: discord.Interaction, banner_url: str, avatar_url: str, channel: discord.TextChannel):
+    # الرد بشكل مخفي (Ephemeral) لصاحب الأمر فقط لكي لا يظهر الشغل للعامة في مكان كتابة الأمر
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
-# أمر عادي يبدأ بـ !pnr ويفتح النافذة مباشرة بدون أثر لأوامر السلاش
-@client.command(name="pnr")
-async def pnr_command(ctx):
-    # حذف رسالة الأمر العادية التي كتبها المستخدم ليبقى الشات نظيفاً تماماً
     try:
-        await ctx.message.delete()
-    except Exception:
-        pass
-    
-    # فتح نافذة الإدخال للمستخدم
-    await ctx.interaction.response.send_modal(ProfileModal()) if hasattr(ctx, 'interaction') else None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(banner_url) as resp:
+                banner_bytes = await resp.read()
+            async with session.get(avatar_url) as resp:
+                avatar_bytes = await resp.read()
+
+        image_file = await create_banner_profile_image(banner_url, avatar_url)
+        view = DownloadView(banner_bytes, avatar_bytes)
+
+        # إرسال الصورة المدمجة مع الزر في الروم الذي حددته أنت
+        await channel.send(file=image_file, view=view)
+
+        # تأكيد العملية لك أنت فقط بشكل سرّي
+        await interaction.followup.send(f"✅ تم إرسال الصورة بنجاح إلى الروم: {channel.mention}", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ حدث خطأ أثناء المعالجة: {e}", ephemeral=True)
 
 if not TOKEN:
     print("خطأ: لم يتم العثور على متغير البيئة TOKEN!")
