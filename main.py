@@ -1,7 +1,6 @@
 import os
 import io
 import discord
-from discord import app_commands
 from discord.ext import commands
 from PIL import Image, ImageOps, ImageDraw
 import aiohttp
@@ -12,7 +11,7 @@ intents.message_content = True
 client = commands.Bot(command_prefix="!", intents=intents)
 TOKEN = os.getenv("TOKEN")
 
-# دالة لدمج البنر والبروفايل بنفس الشكل المطبق في صورتك تماماً
+# دالة لدمج البنر والبروفايل بالشكل المطلوب تماماً
 async def create_banner_profile_image(banner_url: str, avatar_url: str) -> discord.File:
     async with aiohttp.ClientSession() as session:
         async with session.get(banner_url) as resp:
@@ -23,10 +22,8 @@ async def create_banner_profile_image(banner_url: str, avatar_url: str) -> disco
     banner = Image.open(io.BytesIO(banner_bytes)).convert("RGBA")
     avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
 
-    # ضبط مقاسات البنر المستطيل في الأعلى
     banner = banner.resize((960, 320), Image.Resampling.LANCZOS)
 
-    # تجهيز البروفايل الدائري المتداخل على اليسار
     avatar_size = 220
     avatar = avatar.resize((avatar_size, avatar_size), Image.Resampling.LANCZOS)
 
@@ -37,7 +34,6 @@ async def create_banner_profile_image(banner_url: str, avatar_url: str) -> disco
     circular_avatar = Image.new("RGBA", (avatar_size, avatar_size), (0, 0, 0, 0))
     circular_avatar.paste(avatar, (0, 0), mask=mask)
 
-    # إضافة الإطار الدائري المحيط بالبروفايل نفس الستايل
     border_width = 8
     bordered_avatar_size = avatar_size + (border_width * 2)
     bordered_avatar = Image.new("RGBA", (bordered_avatar_size, bordered_avatar_size), (0, 0, 0, 0))
@@ -45,7 +41,6 @@ async def create_banner_profile_image(banner_url: str, avatar_url: str) -> disco
     draw_border.ellipse((0, 0, bordered_avatar_size, bordered_avatar_size), fill=(40, 42, 48, 255))
     bordered_avatar.paste(circular_avatar, (border_width, border_width), mask=circular_avatar)
 
-    # دمج البنر والبروفايل في لوحة واحدة متناسقة
     final_width = 1000
     final_height = 420
     final_image = Image.new("RGBA", (final_width, final_height), (20, 21, 24, 255))
@@ -54,7 +49,6 @@ async def create_banner_profile_image(banner_url: str, avatar_url: str) -> disco
     banner_y = 40
     final_image.paste(banner, (banner_x, banner_y))
 
-    # وضع البروفايل الدائري في المكان المخصص أسفل يسار البنر
     avatar_x = banner_x - 30
     avatar_y = banner_y + banner.height - (bordered_avatar.height // 2) - 10
     final_image.paste(bordered_avatar, (avatar_x, avatar_y), mask=bordered_avatar)
@@ -65,49 +59,79 @@ async def create_banner_profile_image(banner_url: str, avatar_url: str) -> disco
 
     return discord.File(buffer, filename="profile_preview.jpg")
 
-# كلاس الزر التفاعلي
-class DownloadView(discord.ui.View):
-    def __init__(self, banner_url: str, avatar_url: str):
-        super().__init__(timeout=None)
-        self.banner_url = banner_url
-        self.avatar_url = avatar_url
+# نافذة إدخال الروابط (Modal) عند كتابة !pnr
+class ProfileModal(discord.ui.Modal, title="إنشاء طقم البنر والبروفايل"):
+    banner_input = discord.ui.TextInput(
+        label="رابط البنر",
+        placeholder="ضع رابط البنر هنا...",
+        style=discord.TextStyle.short,
+        required=True
+    )
+    
+    avatar_input = discord.ui.TextInput(
+        label="رابط البروفايل",
+        placeholder="ضع رابط صورة البروفايل هنا...",
+        style=discord.TextStyle.short,
+        required=True
+    )
 
-    @discord.ui.button(emoji="<:support:1567912267520147518>", style=discord.ButtonStyle.secondary, custom_id="send_raw_images_btn")
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
+        banner_url = self.banner_input.value
+        avatar_url = self.avatar_input.value
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(banner_url) as resp:
+                    banner_bytes = await resp.read()
+                async with session.get(avatar_url) as resp:
+                    avatar_bytes = await resp.read()
+
+            image_file = await create_banner_profile_image(banner_url, avatar_url)
+            view = DownloadView(banner_bytes, avatar_bytes)
+
+            # إرسال الصورة المدمجة في الشات مع زر الإيموجي فقط
+            await interaction.channel.send(file=image_file, view=view)
+            await interaction.followup.send("✅ تم إنشاء الصورة ونشرها بنجاح!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ حدث خطأ أثناء المعالجة: {e}", ephemeral=True)
+
+# كلاس الزر لإرسال الصورتين كملفات حقيقية بالخاص بدون كلام
+class DownloadView(discord.ui.View):
+    def __init__(self, banner_bytes: bytes, avatar_bytes: bytes):
+        super().__init__(timeout=None)
+        self.banner_bytes = banner_bytes
+        self.avatar_bytes = avatar_bytes
+
+    @discord.ui.button(emoji="<:support:1567912267520147518>", style=discord.ButtonStyle.secondary, custom_id="send_raw_files_btn")
     async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             user = interaction.user
-            # إرسال الصورتين المنفصلتين للخاص بدقة عالية للشكل الطبيعي
-            await user.send(
-                f"📥 إليك الصور الأصلية لتحميلها:\n\n"
-                f"**صورة البنر العريض:**\n{self.banner_url}\n\n"
-                f"**صورة البروفايل الدائرية:**\n{self.avatar_url}"
-            )
-            await interaction.response.send_message("✅ تم إرسال صور البنر والبروفايل إلى خاصك بنجاح!", ephemeral=True)
+            banner_file = discord.File(io.BytesIO(self.banner_bytes), filename="banner.png")
+            avatar_file = discord.File(io.BytesIO(self.avatar_bytes), filename="avatar.png")
+            
+            # إرسال الصورتين كملفات مباشرة في الخاص بدون أي نصوص أو روابط
+            await user.send(files=[banner_file, avatar_file])
+            await interaction.response.send_message("✅ تم إرسال الصور إلى خاصك كملفات!", ephemeral=True)
         except discord.Forbidden:
-            await interaction.response.send_message("❌ عذراً، خاصك (DMs) مغلق، لم أستطع إرسال الصور!", ephemeral=True)
+            await interaction.response.send_message("❌ عذراً، خاصك (DMs) مغلق!", ephemeral=True)
 
 @client.event
 async def on_ready():
     print(f"تم تسجيل الدخول بنجاح باسم: {client.user.name}")
+
+# أمر عادي يبدأ بـ !pnr ويفتح النافذة مباشرة بدون أثر لأوامر السلاش
+@client.command(name="pnr")
+async def pnr_command(ctx):
+    # حذف رسالة الأمر العادية التي كتبها المستخدم ليبقى الشات نظيفاً تماماً
     try:
-        synced = await client.tree.sync()
-        print(f"تمت مزامنة {len(synced)} من الأوامر.")
-    except Exception as e:
-        print(f"حدث خطأ أثناء المزامنة: {e}")
-
-@client.tree.command(name="setprofile", description="إرسال صورة مدمجة للبنر والبروفايل مع زر التحميل للخاص")
-@app_commands.describe(banner_url="رابط صورة البنر", avatar_url="رابط صورة البروفايل")
-async def setprofile_command(interaction: discord.Interaction, banner_url: str, avatar_url: str):
-    await interaction.response.defer(thinking=True)
-
-    try:
-        image_file = await create_banner_profile_image(banner_url, avatar_url)
-        view = DownloadView(banner_url, avatar_url)
-
-        # إرسال الصورة مباشرة بدون أي إيمبد أو كلام، ومعها الزر فقط
-        await interaction.followup.send(file=image_file, view=view)
-    except Exception as e:
-        await interaction.followup.send(f"❌ حدث خطأ أثناء معالجة الصور: {e}", ephemeral=True)
+        await ctx.message.delete()
+    except Exception:
+        pass
+    
+    # فتح نافذة الإدخال للمستخدم
+    await ctx.interaction.response.send_modal(ProfileModal()) if hasattr(ctx, 'interaction') else None
 
 if not TOKEN:
     print("خطأ: لم يتم العثور على متغير البيئة TOKEN!")
