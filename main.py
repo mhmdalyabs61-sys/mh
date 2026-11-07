@@ -1,3 +1,4 @@
+iimport os
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -6,8 +7,8 @@ from discord.ext import commands
 intents = discord.Intents.default()
 client = commands.Bot(command_prefix="!", intents=intents)
 
-# ضع توكن البوت هنا مباشرة داخل المتغير
-TOKEN = "YOUR_BOT_TOKEN_HERE"
+# قراءة التوكن من متغيرات البيئة في Railway تلقائياً
+TOKEN = os.getenv("TOKEN")
 
 @client.event
 async def on_ready():
@@ -40,5 +41,5 @@ async def download_command(interaction: discord.Interaction, image_url: str):
     # إرسال الرسالة للمستخدم في الشات
     await interaction.response.send_message(embed=embed, view=view)
 
-# تشغيل البوت باستخدام متغير التوكن
+# تشغيل البوت بالمتغير
 client.run(TOKEN)
