@@ -4,10 +4,32 @@ from discord import app_commands
 from discord.ext import commands
 
 intents = discord.Intents.default()
+intents.message_content = True
+
 client = commands.Bot(command_prefix="!", intents=intents)
 
-# قراءة التوكن من متغيرات بيئة Railway
 TOKEN = os.getenv("TOKEN")
+
+# كلاس الزر لإرسال الصورتين في الخاص عند الضغط
+class BannerProfileView(discord.ui.View):
+    def __init__(self, banner_url: str, avatar_url: str):
+        super().__init__(timeout=None)
+        self.banner_url = banner_url
+        self.avatar_url = avatar_url
+
+    @discord.ui.button(emoji="<:support:1567912267520147518>", style=discord.ButtonStyle.secondary, custom_id="send_both_images_btn")
+    async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            user = interaction.user
+            # إرسال الصورتين منفصلتين للخاص
+            await user.send(
+                f"📥 **إليك صور البنر والملف الشخصي التي طلبتها:**\n\n"
+                f"**1. صورة البنر:**\n{self.banner_url}\n\n"
+                f"**2. صورة الملف الشخصي (البروفايل):**\n{self.avatar_url}"
+            )
+            await interaction.response.send_message("✅ تم إرسال صور البنر والبروفايل إلى رسائلك الخاصة (الخاص)!", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ عذراً، لم أتمكن من إرسال الصور لأن خاصك (DMs) مغلق!", ephemeral=True)
 
 @client.event
 async def on_ready():
@@ -18,30 +40,20 @@ async def on_ready():
     except Exception as e:
         print(f"حدث خطأ أثناء المزامنة: {e}")
 
-# كلاس الزر التفاعلي لإرسال الصورة بالخاص
-class DownloadView(discord.ui.View):
-    def __init__(self, image_url: str):
-        super().__init__(timeout=None)
-        self.image_url = image_url
+@client.tree.command(name="setprofile", description="إرسال بنر وصورة بروفايل مع زر تحميل للخاص")
+@app_commands.describe(banner_url="رابط صورة البنر", avatar_url="رابط صورة البروفايل (الدائرية)")
+async def setprofile_command(interaction: discord.Interaction, banner_url: str, avatar_url: str):
+    # إرسال البنر والبروفايل في الشات العام مع زر الإيموجي المخصص
+    view = BannerProfileView(banner_url, avatar_url)
+    
+    embed = discord.Embed(title="✨ طقم البنر والبروفايل", color=discord.Color.dark_theme())
+    embed.set_image(url=banner_url)
+    embed.set_thumbnail(url=avatar_url)
+    embed.set_footer(text="اضغط على الزر أدناه لتحميل الصور في الخاص")
 
-    @discord.ui.button(emoji="<:support:1567912267520147518>", style=discord.ButtonStyle.secondary)
-    async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            # محاولة إرسال الصورة في رسالة خاصة (DM) للمستخدم
-            user = interaction.user
-            await user.send(f"إليك الصورة التي طلبتها:\n{self.image_url}")
-            
-            # الرد على الضغطة بشكل مخفي ومؤكد للمستخدم
-            await interaction.response.send_message("✅ تم إرسال الصورة إلى رسائلك الخاصة (الخاص)!", ephemeral=True)
-        except discord.Forbidden:
-            # إذا كان خاص المستخدم مقفل
-            await interaction.response.send_message("❌ عذراً، لم أتمكن من إرسال الصورة لأن خاصك (DMs) مغلق!", ephemeral=True)
+    await interaction.response.send_message(embed=embed, view=view)
 
-@client.tree.command(name="download", description="إرسال صورة مع زر لإرسالها بالخاص")
-@app_commands.describe(image_url="ضع رابط الصورة هنا")
-async def download_command(interaction: discord.Interaction, image_url: str):
-    # إرسال الصورة الأساسية مع الزر في السيرفر
-    view = DownloadView(image_url)
-    await interaction.response.send_message(content=image_url, view=view)
-
-client.run(TOKEN)
+if not TOKEN:
+    print("خطأ: لم يتم العثور على متغير البيئة TOKEN في Railway!")
+else:
+    client.run(TOKEN)
